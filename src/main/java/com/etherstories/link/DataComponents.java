@@ -134,9 +134,42 @@ public final class DataComponents {
         synchronized (DataComponents.class) {
             if (typeIndex != null) return typeIndex;
             Map<String, Object> built = new HashMap<>();
-            indexByEntries(built, dataComponentRegistry());
+            indexInto(built, dataComponentRegistry());
+            int fromRa = built.size();
+            indexInto(built, staticDcRegistry());
             typeIndex = Map.copyOf(built);
+            try {
+                org.bukkit.plugin.java.JavaPlugin.getPlugin(ESLinkPlugin.class).getLogger()
+                        .info("数据组件索引 " + built.size() + " 项（全量 " + fromRa
+                                + " / 静态 " + (built.size() - fromRa) + "）· create:package_contents "
+                                + (built.containsKey("create:package_contents") ? "在索引中" : "不在索引中"));
+            } catch (Throwable ignored) {
+            }
             return typeIndex;
+        }
+    }
+
+    /** 枚举注册表：先 entrySet 反查（ItemKeys 同款），不行再遍历值 + getKey。 */
+    private static void indexInto(Map<String, Object> idx, Object reg) {
+        if (reg == null) return;
+        int before = idx.size();
+        indexByEntries(idx, reg);
+        if (idx.size() > before) return;
+        if (!(reg instanceof Iterable<?> it)) return;
+        for (Object type : it) {
+            if (type == null) continue;
+            String name = nameOf(type);
+            if (name.indexOf(':') > 0) idx.putIfAbsent(name.toLowerCase(Locale.ROOT), type);
+        }
+    }
+
+    /** 静态注册表（兜底）。 */
+    private static Object staticDcRegistry() {
+        try {
+            return Class.forName("net.minecraft.core.registries.BuiltInRegistries")
+                    .getField("DATA_COMPONENT_TYPE").get(null);
+        } catch (Throwable t) {
+            return null;
         }
     }
 
@@ -177,11 +210,13 @@ public final class DataComponents {
     /** DataComponentType 的注册名：注册表反查 getKey，避免依赖不可靠的 toString。 */
     private static String nameOf(Object type) {
         if (type == null) return "";
-        Object reg = dataComponentRegistry();
-        Object rl = invoke(reg, "getKey", type);
-        if (rl != null) {
-            String s = String.valueOf(rl);
-            if (s.indexOf(':') > 0) return s;
+        for (Object reg : new Object[]{dataComponentRegistry(), staticDcRegistry()}) {
+            if (reg == null) continue;
+            Object rl = invoke(reg, "getKey", type);
+            if (rl != null) {
+                String s = String.valueOf(rl);
+                if (s.indexOf(':') > 0) return s;
+            }
         }
         return String.valueOf(type);
     }
@@ -189,10 +224,13 @@ public final class DataComponents {
     private static Object lookup(String id) {
         Object rl = resourceLocation(id);
         if (rl == null) return null;
-        Object reg = dataComponentRegistry();
-        Object r = invoke(reg, "get", rl);
-        if (r instanceof java.util.Optional<?> o) r = o.orElse(null);
-        return r == null ? null : unwrapHolder(r);
+        for (Object reg : new Object[]{dataComponentRegistry(), staticDcRegistry()}) {
+            if (reg == null) continue;
+            Object r = invoke(reg, "get", rl);
+            if (r instanceof java.util.Optional<?> o) r = o.orElse(null);
+            if (r != null) return unwrapHolder(r);
+        }
+        return null;
     }
 
     /** 物品自带组件表：每项是 [type, value]。 */
