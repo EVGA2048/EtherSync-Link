@@ -350,13 +350,13 @@ public final class ChestNet {
      * 发货前置检查：对面注册表里没有这个物品则返回缺失键，否则 null。
      * 清单没同步到时一律放行——没数据不能成为卡住发货的理由。
      */
-    private String peerLacks(Models.ChestRow tx, ItemStack it) {
+    private String compatMiss(Models.ChestRow tx, String itemKey, String csv) {
         String pair = tx.pairCode();
         if (pair == null || pair.isBlank()) return null;
         String peer = otherServer(pair);
         if (peer == null || peer.isBlank() || "?".equals(peer)) return null;
         if (!Compat.haveList(peer)) return null;
-        return Compat.firstMissing(peer, Items.itemKey(it), NestedItems.csv(it));
+        return Compat.firstMissing(peer, itemKey, csv);
     }
 
     /** 物品身上是否带着被管理员禁用的数据组件；命中返回组件 ID。 */
@@ -514,29 +514,12 @@ public final class ChestNet {
         List<Integer> lightSlots = new ArrayList<>();
         List<ItemStack> heavies = new ArrayList<>();
         List<Integer> heavySlots = new ArrayList<>();
-        List<ItemStack> rejected = new ArrayList<>();
-        List<Integer> rejectedSlots = new ArrayList<>();
-        List<String> rejectedWhy = new ArrayList<>();
         for (int i = 0; i < contents.length; i++) {
             ItemStack it = contents[i];
             if (!ItemKeys.real(it)) continue;
             if (Items.hopperLocked(plugin, it)) continue;
             if (!plugin.allowed(it)) continue;
             if (!Items.passFilter(Items.itemKey(it), tx.itemFilter())) continue;
-            String blocked = blockedComponent(it);
-            if (blocked != null) {
-                rejected.add(it.clone());
-                rejectedSlots.add(i);
-                rejectedWhy.add("组件被禁用 " + blocked);
-                continue;
-            }
-            String miss = peerLacks(tx, it);
-            if (miss != null) {
-                rejected.add(it.clone());
-                rejectedSlots.add(i);
-                rejectedWhy.add("对端没有 " + miss);
-                continue;
-            }
             boolean heavy = NestedItems.containerLike(Items.itemKey(it));
             if (heavy && !NestedItems.emptyBox(it) && !ContainerSupport.allow(Items.itemKey(it))) continue;
             if (heavy) {
@@ -546,10 +529,6 @@ public final class ChestNet {
                 lights.add(it.clone());
                 lightSlots.add(i);
             }
-        }
-        // 不兼容 / 被禁用：发送前退回回退箱并通报。
-        for (int j = 0; j < rejected.size(); j++) {
-            moveToBounce(tx, rejected.get(j), rejectedSlots.get(j), rejectedWhy.get(j));
         }
         if (lights.isEmpty() && heavies.isEmpty()) {
             if (sendReadyAt.remove(tx.id()) != null) refreshSign(tx);
@@ -603,17 +582,34 @@ public final class ChestNet {
             List<String> kinds = new ArrayList<>();
             List<Integer> amounts = new ArrayList<>();
             List<Integer> returnSlots = new ArrayList<>();
+            List<ItemStack> rejected = new ArrayList<>();
+            List<Integer> rejectedSlots = new ArrayList<>();
+            List<String> rejectedWhy = new ArrayList<>();
             try {
                 for (int i = 0; i < sends.size(); i++) {
                     ItemStack send = sends.get(i);
                     String key = Items.itemKey(send);
+                    String blocked = blockedComponent(send);
+                    if (blocked != null) {
+                        rejected.add(send);
+                        rejectedSlots.add(slots.get(i));
+                        rejectedWhy.add("组件被禁用 " + blocked);
+                        continue;
+                    }
+                    String csv = NestedItems.csv(send);
+                    String miss = compatMiss(tx, key, csv);
+                    if (miss != null) {
+                        rejected.add(send);
+                        rejectedSlots.add(slots.get(i));
+                        rejectedWhy.add("对端没有 " + miss);
+                        continue;
+                    }
                     long started = System.nanoTime();
                     String b64 = ItemCodec.encode(send);
                     if (b64 == null || b64.isBlank()) {
                         plugin.getLogger().warning("编码失败，留在 TX: " + key);
                         continue;
                     }
-                    String csv = NestedItems.csv(send);
                     if (NestedItems.containerLike(key)) {
                         byte[] raw = java.util.Base64.getDecoder().decode(b64);
                         if (!safeContainerBlob(raw)) {
@@ -647,7 +643,7 @@ public final class ChestNet {
                     amounts.add(send.getAmount());
                     returnSlots.add(requiredBounceSlots(send, dest.serverCode()));
                 }
-                if (prepared.isEmpty()) {
+                if (prepared.isEmpty() && rejected.isEmpty()) {
                     txBusy.remove(tx.id());
                     return;
                 }
@@ -673,6 +669,9 @@ public final class ChestNet {
                         } else {
                             inv.removeItem(send);
                         }
+                    }
+                    for (int j = 0; j < rejected.size(); j++) {
+                        moveToBounce(tx, rejected.get(j), rejectedSlots.get(j), rejectedWhy.get(j));
                     }
                     txBusy.remove(tx.id());
                 });
