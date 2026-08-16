@@ -845,19 +845,17 @@ public final class ItemNbt {
 
     private static Object readTag(byte[] raw) throws Exception {
         Class<?> nbtIo = Class.forName("net.minecraft.nbt.NbtIo");
-        ByteArrayInputStream in = new ByteArrayInputStream(raw);
+        Class<?> acc = Class.forName("net.minecraft.nbt.NbtAccounter");
+        Object unlimited = Reflect.method(acc, "unlimitedHeap").invoke(null);
+        // ESN1 是 gzip 压缩 NBT；必须走 readCompressed(InputStream, NbtAccounter)。
+        // 之前的第二回退把 Class 对象当参数类型传错了，第三回退 read(DataInput) 只能读未压缩数据。
         try {
-            return Reflect.method(nbtIo, "readCompressed", InputStream.class).invoke(null, in);
+            return Reflect.method(nbtIo, "readCompressed", InputStream.class, acc)
+                    .invoke(null, new ByteArrayInputStream(raw), unlimited);
         } catch (Throwable ignored) {
         }
-        in.reset();
-        try {
-            Class<?> acc = Class.forName("net.minecraft.nbt.NbtAccounter");
-            Object unlimited = Reflect.method(acc, "unlimitedHeap").invoke(null);
-            return Reflect.method(nbtIo, "readCompressed", InputStream.class, acc).invoke(null, in, unlimited);
-        } catch (Throwable ignored) {
-        }
-        in.reset();
-        return Reflect.method(nbtIo, "read", java.io.DataInput.class).invoke(null, new java.io.DataInputStream(in));
+        // 未压缩 NBT 回退。
+        return Reflect.method(nbtIo, "read", java.io.DataInput.class)
+                .invoke(null, new java.io.DataInputStream(new ByteArrayInputStream(raw)));
     }
 }
