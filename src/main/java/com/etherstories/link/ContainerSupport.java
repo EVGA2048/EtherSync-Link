@@ -105,6 +105,7 @@ public final class ContainerSupport {
             try {
                 ItemKeys.warm();
                 DataComponents.indexedTypes();
+                DataComponents.captureCreateTypes();
             } catch (Throwable ignored) {
             }
             long ms = (System.nanoTime() - t) / 1_000_000L;
@@ -150,6 +151,7 @@ public final class ContainerSupport {
             NOTES.add("物品索引 " + ItemKeys.indexedItems() + " 项");
             NOTES.add("组件索引 " + DataComponents.indexedTypes() + " 项 · minecraft:container "
                     + (DataComponents.typeLookupWorks() ? "可用" : "缺失"));
+            NOTES.add("Create 直取 " + DataComponents.directSource() + " · 模板 " + DataComponents.templateSource());
             genericOk = roundTrip("minecraft:shulker_box", "潜影盒");
             String pkg = pickPackage();
             packageInstalled = pkg != null;

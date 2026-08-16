@@ -6,7 +6,7 @@
 
     <groupId>com.etherstories</groupId>
     <artifactId>ESLink</artifactId>
-    <version>0.1.62</version>
+    <version>0.1.63</version>
     <packaging>jar</packaging>
     <name>ESLink</name>
     <description>ES2 / SNC 跨服互通（大厅 + TX/RX）</description>
