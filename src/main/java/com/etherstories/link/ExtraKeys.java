@@ -264,18 +264,28 @@ public final class ExtraKeys {
         ItemMeta meta = item.getItemMeta();
         if (meta == null) return;
         var pdc = meta.getPersistentDataContainer();
-        if (!pdc.has(LOST, PersistentDataType.STRING)
-                && !pdc.has(ORIGIN, PersistentDataType.BYTE_ARRAY)
-                && !pdc.has(TOKEN, PersistentDataType.STRING))
-            return;
-        pdc.remove(LOST);
-        pdc.remove(ORIGIN);
-        pdc.remove(TOKEN);
-        List<String> lore = meta.getLore();
-        if (lore != null) {
-            List<String> next = new ArrayList<>(lore);
-            stripStamp(next);
-            meta.setLore(next.isEmpty() ? null : next);
+        Set<NamespacedKey> keys = pdc.getKeys();
+        if (keys == null || keys.isEmpty()) return;
+        boolean oldMarker = false;
+        for (NamespacedKey k : keys) {
+            if (k.getNamespace().equalsIgnoreCase("eslink")) {
+                oldMarker |= k.getKey().equalsIgnoreCase("act")
+                        || k.getKey().equalsIgnoreCase("id")
+                        || k.getKey().equalsIgnoreCase("data");
+                pdc.remove(k);
+            }
+        }
+        if (oldMarker) {
+            // 旧版占位标识是屏障 + 假名字/lore，清掉后恢复成普通屏障。
+            meta.setDisplayName(null);
+            meta.setLore(null);
+        } else {
+            List<String> lore = meta.getLore();
+            if (lore != null) {
+                List<String> next = new ArrayList<>(lore);
+                stripStamp(next);
+                meta.setLore(next.isEmpty() ? null : next);
+            }
         }
         item.setItemMeta(meta);
     }
@@ -287,9 +297,10 @@ public final class ExtraKeys {
     public static boolean hasStamp(ItemStack item) {
         if (item == null || !item.hasItemMeta()) return false;
         var pdc = item.getItemMeta().getPersistentDataContainer();
-        return pdc.has(LOST, PersistentDataType.STRING)
-                || pdc.has(ORIGIN, PersistentDataType.BYTE_ARRAY)
-                || pdc.has(TOKEN, PersistentDataType.STRING);
+        for (NamespacedKey k : pdc.getKeys()) {
+            if (k.getNamespace().equalsIgnoreCase("eslink")) return true;
+        }
+        return false;
     }
 
     private static void stripStamp(List<String> lore) {
