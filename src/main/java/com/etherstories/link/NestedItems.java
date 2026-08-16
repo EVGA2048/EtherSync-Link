@@ -31,8 +31,13 @@ public final class NestedItems {
     private static final Set<String> SKIP_NS = Set.of(
             "http", "https", "www", "text", "extra", "color", "bold", "italic",
             "click", "hover", "nbt", "type", "slot", "count", "tag", "name", "id");
+    private static volatile String lastFillError = "";
 
     private NestedItems() {}
+
+    public static String lastFillError() {
+        return lastFillError;
+    }
 
     public static String csv(ItemStack item) {
         LinkedHashSet<String> keys = new LinkedHashSet<>();
@@ -242,10 +247,19 @@ public final class NestedItems {
     }
 
     static ItemStack applyComponent(ItemStack box, String componentId, List<ItemStack> inners) {
+        lastFillError = "";
         try {
             Object contents = makeContainer(inners);
-            return contents == null ? null : DataComponents.write(box, componentId, contents);
+            if (contents == null) {
+                lastFillError = "makeContainer=null " + componentId;
+                return null;
+            }
+            ItemStack out = DataComponents.write(box, componentId, contents);
+            if (out == null && lastFillError.isEmpty()) lastFillError = DataComponents.lastWriteError();
+            return out;
         } catch (Throwable t) {
+            lastFillError = "异常 " + t.getClass().getSimpleName()
+                    + (t.getMessage() == null ? "" : ": " + t.getMessage());
             return null;
         }
     }
@@ -256,6 +270,10 @@ public final class NestedItems {
             if (!ItemKeys.real(it)) continue;
             Object s = ItemKeys.nmsOf(it);
             if (s != null) nms.add(s);
+        }
+        if (nms.isEmpty()) {
+            lastFillError = "makeContainer 没有可用的 NMS 物品";
+            return null;
         }
         Class<?> icc = Class.forName("net.minecraft.world.item.component.ItemContainerContents");
         for (String name : new String[]{"fromItems", "of"}) {
@@ -273,6 +291,7 @@ public final class NestedItems {
             } catch (Throwable ignored) {
             }
         }
+        lastFillError = "makeContainer 反射失败";
         return null;
     }
 

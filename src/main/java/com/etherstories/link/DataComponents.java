@@ -50,8 +50,13 @@ public final class DataComponents {
     private static final Set<String> DIRECT_SOURCES = ConcurrentHashMap.newKeySet();
     private static volatile String templateLabel = "未尝试";
     private static volatile int templateTypeCount;
+    private static volatile String lastWriteError = "未写入";
 
     private DataComponents() {}
+
+    public static String lastWriteError() {
+        return lastWriteError;
+    }
 
     public static Object read(ItemStack item, String id) {
         if (item == null || id == null) return null;
@@ -89,19 +94,39 @@ public final class DataComponents {
 
     /** 写入后返回新物品；写不了返回 null，由调用方决定是否放弃。 */
     public static ItemStack write(ItemStack item, String id, Object value) {
-        if (item == null || id == null || value == null) return null;
+        if (item == null || id == null || value == null) {
+            lastWriteError = "参数为空";
+            return null;
+        }
         try {
             Object nms = nms(item);
-            if (nms == null) return null;
+            if (nms == null) {
+                lastWriteError = "nms=null";
+                return null;
+            }
             Object type = type(id);
             if (type == null) type = typeFromItem(nms, id);
-            if (type == null) return null;
-            if (!set(nms, type, value)) return null;
+            if (type == null) {
+                lastWriteError = "type=null " + id;
+                return null;
+            }
+            if (!set(nms, type, value)) {
+                lastWriteError = "set=false id=" + id
+                        + " type=" + type.getClass().getName()
+                        + " value=" + value.getClass().getName();
+                return null;
+            }
             ItemStack out = ItemKeys.fromNms(nms);
-            if (!ItemKeys.real(out)) return null;
+            if (!ItemKeys.real(out)) {
+                lastWriteError = "fromNms/real=false id=" + id + " out=" + out;
+                return null;
+            }
             out.setAmount(Math.max(1, item.getAmount()));
+            lastWriteError = "";
             return out;
         } catch (Throwable t) {
+            lastWriteError = "异常 " + t.getClass().getSimpleName()
+                    + (t.getMessage() == null ? "" : ": " + t.getMessage());
             return null;
         }
     }
@@ -157,6 +182,26 @@ public final class DataComponents {
         return templateLabel;
     }
 
+    /** 强制把注册表索引建出来，供自检异步阶段预热，避免主线程第一次 type() 才建索引。 */
+    public static void warm() {
+        index();
+    }
+
+    /** 这个组件的 type 能否被 ItemStack.set 接受（诊断类加载器/类型不匹配）。 */
+    public static boolean setCompatible(String id) {
+        Object type = type(id);
+        if (type == null) return false;
+        try {
+            Class<?> stack = Class.forName("net.minecraft.world.item.ItemStack");
+            for (Method m : Reflect.methods(stack)) {
+                if (m.getName().equals("set") && m.getParameterCount() == 2
+                        && m.getParameterTypes()[0].isInstance(type)) return true;
+            }
+        } catch (Throwable ignored) {
+        }
+        return false;
+    }
+
     /** 这个组件 ID 能否解析出类型（索引 + 正查 + 模组类直取都会试）。 */
     public static boolean indexed(String id) {
         return type(id) != null;
@@ -178,13 +223,15 @@ public final class DataComponents {
     static Object type(String id) {
         if (id == null || id.isBlank()) return null;
         String key = id.toLowerCase(Locale.ROOT);
+        Map<String, Object> idx = index();
+        Object found = idx.get(key);
+        if (found != null) return found;
+        // 索引没命中时，再用物品组件表/模组类直取补进来的缓存。
         Object cached = TYPES.get(key);
         if (cached != null) return cached;
         boolean retryable = cached == ABSENT && KNOWN_STATIC_TYPES.containsKey(key);
         if (cached == ABSENT && !retryable) return null;
-        Object found = index().get(key);
-        if (found == null) found = knownStaticType(key);
-        if (found == null) found = lookup(id);
+        found = lookup(id);
         if (found != null) {
             TYPES.put(key, found);
         } else if (!KNOWN_STATIC_TYPES.containsKey(key)) {
@@ -230,8 +277,10 @@ public final class DataComponents {
             staticIndexCount = built.size() - raIndexCount;
             int before = built.size();
             for (String id : KNOWN_STATIC_TYPES.keySet()) {
-                Object direct = knownStaticType(id);
-                if (direct != null) built.putIfAbsent(id.toLowerCase(Locale.ROOT), direct);
+                String key = id.toLowerCase(Locale.ROOT);
+                if (built.containsKey(key)) continue;
+                Object direct = knownStaticType(key);
+                if (direct != null) built.putIfAbsent(key, direct);
             }
             directIndexCount = built.size() - before;
             typeIndex = Map.copyOf(built);
@@ -456,7 +505,6 @@ public final class DataComponents {
             Object value = cls.getField(loc[1]).get(null);
             if (value == null) return null;
             STATIC_IDS.put(value, key);
-            TYPES.put(key, value);
             DIRECT_SOURCES.add("create:" + loc[1]);
             return value;
         } catch (Throwable t) {
@@ -568,6 +616,17 @@ public final class DataComponents {
     }
 
     private static boolean set(Object nms, Object type, Object value) {
+        // 先走 ItemStack.set(DataComponentType, Object) 的精确签名，避免 Reflect.methods 顺序/扫描问题。
+        try {
+            Class<?> stack = Class.forName("net.minecraft.world.item.ItemStack");
+            Class<?> dct = Class.forName("net.minecraft.core.component.DataComponentType");
+            Method exact = stack.getMethod("set", dct, Object.class);
+            if (exact.getParameterTypes()[0].isInstance(type)) {
+                exact.invoke(nms, type, value);
+                return true;
+            }
+        } catch (Throwable ignored) {
+        }
         for (Method m : Reflect.methods(nms.getClass())) {
             if (m.getParameterCount() != 2) continue;
             String n = m.getName();

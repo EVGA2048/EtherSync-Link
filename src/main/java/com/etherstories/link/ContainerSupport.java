@@ -104,7 +104,7 @@ public final class ContainerSupport {
             long t = System.nanoTime();
             try {
                 ItemKeys.warm();
-                DataComponents.indexedTypes();
+                DataComponents.warm();
                 DataComponents.captureCreateTypes();
             } catch (Throwable ignored) {
             }
@@ -151,7 +151,8 @@ public final class ContainerSupport {
             NOTES.add("物品索引 " + ItemKeys.indexedItems() + " 项");
             NOTES.add("组件索引 " + DataComponents.indexedTypes() + " 项 · minecraft:container "
                     + (DataComponents.typeLookupWorks() ? "可用" : "缺失"));
-            NOTES.add("Create 直取 " + DataComponents.directSource() + " · 模板 " + DataComponents.templateSource());
+            NOTES.add("Create 直取 " + DataComponents.directSource() + " · 模板 " + DataComponents.templateSource()
+                    + " · set兼容 " + (DataComponents.setCompatible("create:package_contents") ? "OK" : "NO"));
             genericOk = roundTrip("minecraft:shulker_box", "潜影盒");
             String pkg = pickPackage();
             packageInstalled = pkg != null;
@@ -220,6 +221,9 @@ public final class ContainerSupport {
             if (inside == null || inside.size() < want.size()) {
                 NOTES.add(label + " 装不进 " + key
                         + " · type(create:package_contents)=" + (DataComponents.type("create:package_contents") != null ? "OK" : "FAIL")
+                        + " · set兼容=" + (DataComponents.setCompatible("create:package_contents") ? "OK" : "NO")
+                        + " · 写入=" + DataComponents.lastWriteError()
+                        + " · 填充=" + NestedItems.lastFillError()
                         + " · " + NestedItems.componentSummary(filled));
                 return false;
             }
