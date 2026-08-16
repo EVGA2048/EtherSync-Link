@@ -38,6 +38,8 @@ public final class ItemNbt {
     private static final ThreadLocal<Integer> DEPTH = ThreadLocal.withInitial(() -> 0);
     private static final java.util.Map<String, Long> FORMAT_COUNTS = new java.util.concurrent.ConcurrentHashMap<>();
     private static volatile String lastSnapshotError = "";
+    private static volatile String lastLoadError = "";
+    private static volatile String lastParseError = "";
 
     private static void count(String fmt) {
         FORMAT_COUNTS.merge(fmt, 1L, Long::sum);
@@ -53,6 +55,8 @@ public final class ItemNbt {
         out.add(sb.toString());
         if (lastSnapshotError != null && !lastSnapshotError.isBlank())
             out.add("最近快照失败 " + lastSnapshotError);
+        if (lastLoadError != null && !lastLoadError.isBlank())
+            out.add("最近还原失败 " + lastLoadError);
         return out;
     }
 
@@ -106,14 +110,33 @@ public final class ItemNbt {
             }
             if (has(blob, MAGIC1)) {
                 Object tag = readTag(payload(blob, MAGIC1));
-                if (tag == null) return null;
-                Object nms = parseStack(tag, registryAccess());
-                return nms == null ? null : namedFromNms(nms);
+                if (tag == null) {
+                    loadError("ESN1 readTag 失败");
+                    return null;
+                }
+                Object regs = registryAccess();
+                Object nms = parseStack(tag, regs);
+                if (nms == null) {
+                    loadError("ESN1 parseStack 失败 regs="
+                            + (regs == null ? "null" : regs.getClass().getName())
+                            + " tag=" + tag.getClass().getName() + " · " + lastParseError);
+                    return null;
+                }
+                ItemStack st = namedFromNms(nms);
+                if (st == null) loadError("ESN1 namedFromNms 失败 nms=" + nms.getClass().getName());
+                return st;
             }
             if (has(blob, MAGIC0)) return loadKeyOnly(payload(blob, MAGIC0));
-        } catch (Throwable ignored) {
+        } catch (Throwable t) {
+            loadError("load 异常 " + t.getClass().getSimpleName()
+                    + (t.getMessage() == null ? "" : ": " + t.getMessage()));
         }
         return null;
+    }
+
+    private static void loadError(String msg) {
+        lastLoadError = msg;
+        if (PACK_LOG.add("load:" + msg)) warn("快照还原失败 " + msg);
     }
 
     public static boolean ours(byte[] blob) {
@@ -801,6 +824,33 @@ public final class ItemNbt {
 
     private static Object parseStack(Object tag, Object regs) throws Exception {
         Class<?> stack = Class.forName("net.minecraft.world.item.ItemStack");
+        lastParseError = "";
+        // 先按精确签名走 getMethod，避免 Reflect.methods 在混合端扫方法表失败。
+        Class<?> provider = Class.forName("net.minecraft.core.HolderLookup$Provider");
+        Class<?> compound = Class.forName("net.minecraft.nbt.CompoundTag");
+        Class<?> tagCls = Class.forName("net.minecraft.nbt.Tag");
+        if (regs != null && provider.isInstance(regs)) {
+            if (compound.isInstance(tag)) {
+                try {
+                    Object r = Reflect.method(stack, "parseOptional", provider, compound).invoke(null, regs, tag);
+                    if (r != null) return r;
+                } catch (Throwable t) {
+                    lastParseError = "parseOptional " + shortMsg(t);
+                }
+            }
+            if (tagCls.isInstance(tag)) {
+                try {
+                    Object r = Reflect.method(stack, "parse", provider, tagCls).invoke(null, regs, tag);
+                    if (r instanceof Optional<?> o) r = o.orElse(null);
+                    if (r != null) return r;
+                } catch (Throwable t) {
+                    lastParseError = "parse " + shortMsg(t);
+                }
+            }
+        } else {
+            lastParseError = "regs 不是 HolderLookup.Provider: "
+                    + (regs == null ? "null" : regs.getClass().getName());
+        }
         for (String name : new String[]{"parseOptional", "parse", "of"}) {
             for (Method m : Reflect.methods(stack)) {
                 if (!m.getName().equals(name)) continue;
