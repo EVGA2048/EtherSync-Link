@@ -216,7 +216,9 @@ public final class ContainerSupport {
             ItemStack filled = NestedItems.fill(box, want);
             List<ItemStack> inside = NestedItems.inners(filled);
             if (inside == null || inside.size() < want.size()) {
-                NOTES.add(label + " 装不进 " + key + " · " + NestedItems.componentSummary(filled));
+                NOTES.add(label + " 装不进 " + key
+                        + " · type(create:package_contents)=" + (DataComponents.type("create:package_contents") != null ? "OK" : "FAIL")
+                        + " · " + NestedItems.componentSummary(filled));
                 return false;
             }
             byte[] blob = ItemNbt.save(filled);

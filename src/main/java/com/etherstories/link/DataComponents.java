@@ -20,6 +20,9 @@ public final class DataComponents {
     private static final Object ABSENT = new Object();
     private static final Map<String, Object> TYPES = new java.util.concurrent.ConcurrentHashMap<>();
     private static volatile Map<String, Object> typeIndex;
+    private static volatile int raIndexCount;
+    private static volatile int staticIndexCount;
+    private static volatile String regSourceLabel = "未初始化";
 
     private DataComponents() {}
 
@@ -89,6 +92,38 @@ public final class DataComponents {
         return idx == null ? 0 : idx.size();
     }
 
+    public static int raIndexedTypes() {
+        Map<String, Object> idx = typeIndex;
+        if (idx == null) return 0;
+        return raIndexCount;
+    }
+
+    public static int staticIndexedTypes() {
+        Map<String, Object> idx = typeIndex;
+        if (idx == null) return 0;
+        return staticIndexCount;
+    }
+
+    public static String registrySource() {
+        return regSourceLabel;
+    }
+
+    /** 这个组件 ID 能否解析出类型（索引 + 正查两条路都会试）。 */
+    public static boolean indexed(String id) {
+        return type(id) != null;
+    }
+
+    /** 供 /link diag 展示的诊断行。 */
+    public static List<String> diagLines() {
+        List<String> out = new ArrayList<>();
+        out.add("组件索引 " + indexedTypes() + " 项（全量 " + raIndexedTypes() + " / 静态 " + staticIndexedTypes() + "）");
+        out.add("注册表来源 " + registrySource());
+        for (String id : new String[]{"create:package_contents", "create:package_address", "create:clipboard_content"}) {
+            out.add(id + " " + (indexed(id) ? "可解析" : "解析失败"));
+        }
+        return out;
+    }
+
     static Object type(String id) {
         if (id == null || id.isBlank()) return null;
         Object cached = TYPES.get(id);
@@ -116,15 +151,9 @@ public final class DataComponents {
             }
         } catch (Throwable ignored) {
         }
-        if (reg == null) {
-            try {
-                reg = Class.forName("net.minecraft.core.registries.BuiltInRegistries")
-                        .getField("DATA_COMPONENT_TYPE").get(null);
-            } catch (Throwable ignored) {
-            }
-        }
         dcRegCache = reg;
         dcRegProbed = true;
+        regSourceLabel = reg == null ? "null" : reg.getClass().getName();
         return reg;
     }
 
@@ -135,13 +164,14 @@ public final class DataComponents {
             if (typeIndex != null) return typeIndex;
             Map<String, Object> built = new HashMap<>();
             indexInto(built, dataComponentRegistry());
-            int fromRa = built.size();
+            raIndexCount = built.size();
             indexInto(built, staticDcRegistry());
+            staticIndexCount = built.size() - raIndexCount;
             typeIndex = Map.copyOf(built);
             try {
                 org.bukkit.plugin.java.JavaPlugin.getPlugin(ESLinkPlugin.class).getLogger()
-                        .info("数据组件索引 " + built.size() + " 项（全量 " + fromRa
-                                + " / 静态 " + (built.size() - fromRa) + "）· create:package_contents "
+                        .info("数据组件索引 " + built.size() + " 项（全量 " + raIndexCount
+                                + " / 静态 " + staticIndexCount + "）· create:package_contents "
                                 + (built.containsKey("create:package_contents") ? "在索引中" : "不在索引中"));
             } catch (Throwable ignored) {
             }

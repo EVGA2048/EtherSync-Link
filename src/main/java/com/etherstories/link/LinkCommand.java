@@ -212,6 +212,8 @@ public final class LinkCommand implements TabExecutor {
         plugin.msg(p, "&7平台 &f" + RuntimeEnv.label());
         for (String line : ContainerSupport.lines()) plugin.msg(p, "&7" + line);
         for (String line : Compat.lines(plugin)) plugin.msg(p, "&7" + line);
+        for (String line : DataComponents.diagLines()) plugin.msg(p, "&7" + line);
+        for (String line : ItemNbt.diagLines()) plugin.msg(p, "&7" + line);
         plugin.msg(p, "&8/link diag retry  重跑自检  ·  /link diag io  红石节点");
     }
 

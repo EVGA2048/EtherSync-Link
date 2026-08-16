@@ -36,6 +36,25 @@ public final class ItemNbt {
     private static final byte[] MAGIC6 = {'E', 'S', 'N', '6'};
     private static final Set<String> PACK_LOG = ConcurrentHashMap.newKeySet();
     private static final ThreadLocal<Integer> DEPTH = ThreadLocal.withInitial(() -> 0);
+    private static final java.util.Map<String, Long> FORMAT_COUNTS = new java.util.concurrent.ConcurrentHashMap<>();
+    private static volatile String lastSnapshotError = "";
+
+    private static void count(String fmt) {
+        FORMAT_COUNTS.merge(fmt, 1L, Long::sum);
+    }
+
+    /** 供 /link diag 展示的诊断行。 */
+    public static List<String> diagLines() {
+        List<String> out = new ArrayList<>();
+        StringBuilder sb = new StringBuilder("快照格式");
+        List<String> keys = new ArrayList<>(FORMAT_COUNTS.keySet());
+        java.util.Collections.sort(keys);
+        for (String k : keys) sb.append(' ').append(k).append('=').append(FORMAT_COUNTS.get(k));
+        out.add(sb.toString());
+        if (lastSnapshotError != null && !lastSnapshotError.isBlank())
+            out.add("最近快照失败 " + lastSnapshotError);
+        return out;
+    }
 
     private ItemNbt() {}
 
@@ -65,6 +84,7 @@ public final class ItemNbt {
             if (PACK_LOG.add("keyonly:" + key))
                 warn("整包快照失败，只能发注册名，物品数据会丢: " + key + " · " + err
                         + " · " + NestedItems.componentSummary(item));
+            lastSnapshotError = key + " · " + err;
             return saveKeyOnly(item);
         } catch (Throwable t) {
             return null;
@@ -185,15 +205,24 @@ public final class ItemNbt {
                 if (tag == null) tag = saveCodecTag(nms, regs, err);
                 if (tag != null) {
                     byte[] raw = writeTag(tag);
-                    if (raw != null && raw.length > 0) return prefix(MAGIC1, raw);
+                    if (raw != null && raw.length > 0) {
+                        count("ESN1-m");
+                        return prefix(MAGIC1, raw);
+                    }
                     err.append("[writeTag]");
                 }
                 byte[] stream = saveStream(nms, err);
-                if (stream != null && stream.length > 0) return prefix(MAGIC2, stream);
+                if (stream != null && stream.length > 0) {
+                    count("ESN2-m");
+                    return prefix(MAGIC2, stream);
+                }
                 return null;
             }
             byte[] stream = saveStream(nms, err);
-            if (stream != null && stream.length > 0) return prefix(MAGIC2, stream);
+            if (stream != null && stream.length > 0) {
+                count("ESN2");
+                return prefix(MAGIC2, stream);
+            }
             Object tag = saveTag(nms, regs, err);
             if (tag == null) tag = saveCodecTag(nms, regs, err);
             if (tag == null) return null;
@@ -202,6 +231,7 @@ public final class ItemNbt {
                 err.append("[writeTag]");
                 return null;
             }
+            count("ESN1");
             return prefix(MAGIC1, raw);
         } catch (Throwable t) {
             err.append("[saveNms ").append(t.getClass().getSimpleName()).append(']');
@@ -240,6 +270,7 @@ public final class ItemNbt {
                 out.write(child);
             }
             out.flush();
+            count("ESN6");
             return prefix(MAGIC6, raw.toByteArray());
         } catch (Throwable t) {
             return null;
@@ -354,6 +385,7 @@ public final class ItemNbt {
             out.writeInt(Math.max(1, item.getAmount()));
             out.writeUTF(nz(plainName(item)));
             out.flush();
+            count("ESN0");
             return prefix(MAGIC0, raw.toByteArray());
         } catch (Throwable t) {
             return null;
