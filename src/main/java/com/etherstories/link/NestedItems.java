@@ -499,8 +499,25 @@ public final class NestedItems {
     private static void addType(String raw, Set<String> out) {
         if (raw == null || raw.isBlank()) return;
         String s = raw.trim().toLowerCase(Locale.ROOT);
-        if (!s.contains(":")) s = "minecraft:" + s;
-        if (ItemKeys.usable(s)) out.add(s);
+        int i = s.indexOf(':');
+        if (i >= 0) {
+            String ns = s.substring(0, i);
+            String path = s.substring(i + 1);
+            if (SKIP_NS.contains(ns)) return;
+            // minecraft 命名空间只认真实存在的原版 Material，避免 NBT 里
+            // create_clipboard 这类字符串被拼成 minecraft:create_clipboard。
+            if (ns.equals("minecraft")) {
+                org.bukkit.Material mat = org.bukkit.Material.matchMaterial(path);
+                if (mat == null || mat.isAir()) return;
+            } else if (path.isBlank()) {
+                return;
+            }
+            if (ItemKeys.usable(s)) out.add(s);
+            return;
+        }
+        // 没有命名空间：只把真实原版 Material 补成 minecraft:*，模组短名不再乱猜。
+        org.bukkit.Material mat = org.bukkit.Material.matchMaterial(s);
+        if (mat != null && !mat.isAir()) out.add("minecraft:" + s);
     }
 
     static String legacyCustomName(Object nms) {
