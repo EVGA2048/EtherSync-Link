@@ -1137,7 +1137,9 @@ public final class ChestNet {
     private static boolean lossyEncode(ItemStack send, String b64) {
         if (!send.hasItemMeta()) return false;
         try {
-            return !ItemNbt.rich(java.util.Base64.getDecoder().decode(b64));
+            byte[] blob = java.util.Base64.getDecoder().decode(b64);
+            if (ItemEnvelope.ours(blob)) return !ItemEnvelope.rich(blob);
+            return !ItemNbt.rich(blob);
         } catch (Throwable t) {
             return false;
         }
