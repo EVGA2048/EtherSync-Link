@@ -1,0 +1,83 @@
+# ESLink
+# 新版本会自动补缺失的键，不会改你已经填过的值。
+# /link 大厅    /link chest    /link io    /link settings
+
+config-version: 13
+config:
+  auto-fill-missing: true
+
+mysql:
+  host: 127.0.0.1
+  port: 3306
+  database: eslink
+  user: root
+  password: ""
+
+server:
+  # 内部代号，唯一，只能字母数字。只给牌子箭头用，玩家界面不显示。
+  code: ES2
+  name: 以太物语
+  blurb: Create 机械动力 · 生存建筑
+  # 大厅标识：TERRACOTTA 陶瓦 / CONCRETE 混凝土
+  icon: TERRACOTTA
+  # WHITE LIGHT_GRAY GRAY BLACK BROWN RED ORANGE YELLOW LIME GREEN CYAN LIGHT_BLUE BLUE PURPLE MAGENTA PINK
+  color: LIGHT_BLUE
+
+# 空列表 = 允许任意物品。正式请写成 namespaced key，如 minecraft:iron_ingot
+whitelist: []
+
+heartbeat-seconds: 5
+offline-after-seconds: 20
+scan-seconds: 2
+sound-cooldown-ticks: 40
+
+# 运输箱。给生产线用：每轮多送几组，路上积压满了就暂停，不炸、不刷屏。
+# 不是实时管道。一对箱子大约 2 秒一轮 × stacks-per-scan 组。
+chest:
+  stacks-per-scan: 4
+  queue-limit: 16
+  # 纸箱/潜影盒先倒计时再发（铁锭等小件照常走）。0=关掉。东西越多越接近 max。
+  heavy-delay-seconds: 3
+  heavy-max-seconds: 8
+  # 对面没有的模组附魔/属性：deliver=照样给（lore 写丢了什么，带回原服可恢复）；refuse=当缺物品
+  unknown-extra: deliver
+  # 潜影盒 / 包裹等带内含的容器。auto=启动自检通过才收发（推荐）；on=强开；off=永不收发
+  # 自检结果看 /link diag
+  containers: auto
+
+# 红石：本地每 tick 套用 0–15。跨服只在等级变化或心跳时写库。
+# 对端掉线 / 超过 stale-ms 没心跳 / 区块没加载 → 输出固定 0。
+# 不要设成“每 tick 写 MySQL”。两边 TPS 不同、还有延迟，对不齐，只会打爆库。
+io:
+  # 出问题时的总开关：false = 完全不跑红石，箱子照常。
+  enabled: true
+  keepalive-ms: 1000
+  stale-ms: 5000
+
+alerts:
+  # 本服有人上架，通知本服所有人
+  listing: true
+  # 接收其他服务器的上架广播
+  listing-remote: true
+  # 有人创建运输箱时通知本服管理
+  chest-admin: true
+
+trade:
+  enabled: true
+  # 0.05 = 买家多付 5%，卖家仍收标价
+  tax-rate: 0
+  # 税入账玩家名；空则尝试用 ES2UniPlugin 的 tax.sink-account；再空则销毁
+  sink-account: ""
+
+# 也可给权限 eslink.super。用来删除调试残留的服务器记录。
+super-admins: []
+
+chat:
+  enabled: true
+  default: local
+  prefix: "[{name}] "
+  max-length: 128
+  item: true
+  fast-window-seconds: 8
+  fast-count: 3
+  fast-remind-seconds: 25

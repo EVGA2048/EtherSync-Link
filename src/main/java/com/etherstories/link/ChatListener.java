@@ -1,0 +1,110 @@
+package com.etherstories.link;
+
+import io.papermc.paper.event.player.AsyncChatEvent;
+import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
+import org.bukkit.Bukkit;
+import org.bukkit.entity.Player;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
+import org.bukkit.event.Listener;
+import org.bukkit.inventory.ItemStack;
+
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+
+public final class ChatListener implements Listener {
+    private final ESLinkPlugin plugin;
+    private final Map<UUID, Snap> snaps = new ConcurrentHashMap<>();
+
+    private record Snap(String plain, ItemStack item) {}
+
+    public ChatListener(ESLinkPlugin plugin) { this.plugin = plugin; }
+
+    @EventHandler(priority = EventPriority.LOWEST)
+    public void onChat(AsyncChatEvent e) {
+        Player p = e.getPlayer();
+        Sessions.State st = plugin.sessions().of(p);
+        if (!st.awaitingSearch && !st.awaitingPrice && !st.awaitingPair) return;
+        e.setCancelled(true);
+        snaps.remove(p.getUniqueId());
+        String msg = PlainTextComponentSerializer.plainText().serialize(e.message()).trim();
+        Bukkit.getScheduler().runTask(plugin, () -> handle(p, st, msg));
+    }
+
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void snapshot(AsyncChatEvent e) {
+        Player p = e.getPlayer();
+        String plain = PlainTextComponentSerializer.plainText().serialize(e.message());
+        ItemStack hand = p.getInventory().getItemInMainHand();
+        ItemStack clone = (hand == null || hand.getType().isAir()) ? null : hand.clone();
+        snaps.put(p.getUniqueId(), new Snap(plain, clone));
+    }
+
+    @EventHandler(priority = EventPriority.NORMAL, ignoreCancelled = true)
+    public void decorate(AsyncChatEvent e) {
+        Player p = e.getPlayer();
+        Snap snap = snaps.get(p.getUniqueId());
+        String plain = snap != null ? snap.plain()
+                : PlainTextComponentSerializer.plainText().serialize(e.message());
+        ItemStack item = snap != null ? snap.item() : p.getInventory().getItemInMainHand();
+        if (plugin.getConfig().getBoolean("chat.item", true) && ItemChat.hasToken(plain)) {
+            e.message(ItemChatPaper.replace(plain, item));
+        } else {
+            e.message(ItemChatPaper.legacy(plain));
+        }
+        if (plugin.chat() != null && plugin.chat().isAll(p)) {
+            var prev = e.renderer();
+            String tag = plugin.chat().localTag();
+            e.renderer((source, displayName, message, viewer) ->
+                    ItemChatPaper.legacy(tag).append(prev.render(source, displayName, message, viewer)));
+        }
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onGlobal(AsyncChatEvent e) {
+        Player p = e.getPlayer();
+        Sessions.State st = plugin.sessions().of(p);
+        if (st.awaitingSearch || st.awaitingPrice || st.awaitingPair) return;
+        Snap snap = snaps.remove(p.getUniqueId());
+        if (plugin.chat() == null || !plugin.chat().isAll(p)) return;
+        String msg = snap != null ? snap.plain()
+                : PlainTextComponentSerializer.plainText().serialize(e.message());
+        ItemStack item = snap != null ? snap.item() : null;
+        plugin.chat().send(p, msg, item);
+    }
+
+    private void handle(Player p, Sessions.State st, String msg) {
+        if (msg.equalsIgnoreCase("cancel") || msg.equals("取消") || msg.equalsIgnoreCase("c")) {
+            st.awaitingSearch = false;
+            st.awaitingPrice = false;
+            st.awaitingPair = false;
+            st.repriceId = 0;
+            st.listItem = null;
+            plugin.msg(p, "已取消");
+            plugin.gui().openHome(p);
+            return;
+        }
+        if (st.awaitingPair) {
+            st.awaitingPair = false;
+            plugin.gui().tryPairUnit(p, msg);
+            return;
+        }
+        if (st.awaitingSearch) {
+            st.awaitingSearch = false;
+            st.query = msg;
+            st.marketPage = 0;
+            plugin.gui().openMarket(p);
+            return;
+        }
+        if (st.awaitingPrice) {
+            try {
+                double price = Double.parseDouble(msg.replace(',', '.'));
+                if (st.repriceId > 0) plugin.gui().finishReprice(p, price);
+                else plugin.gui().finishSell(p, price);
+            } catch (NumberFormatException ex) {
+                plugin.msg(p, "&c输入数字单价，或 cancel");
+            }
+        }
+    }
+}

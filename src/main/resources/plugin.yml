@@ -1,0 +1,24 @@
+name: ESLink
+version: 0.1.57
+main: com.etherstories.link.ESLinkPlugin
+api-version: "1.21"
+description: ES2 / SNC 跨服互通大厅与 TX/RX 箱
+authors: [ EtherStories ]
+softdepend: [ Vault, ES2UniPlugin ]
+
+commands:
+  link:
+    description: 打开互通大厅
+    usage: /link
+    aliases: [eslink, "互通"]
+
+permissions:
+  eslink.use:
+    default: true
+  eslink.chest:
+    default: true
+  eslink.admin:
+    default: op
+  eslink.super:
+    description: 删除错误服务器等超级管理
+    default: op
