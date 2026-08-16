@@ -1,5 +1,5 @@
 name: ESLink
-version: 0.1.61
+version: 0.1.62
 main: com.etherstories.link.ESLinkPlugin
 api-version: "1.21"
 description: ES2 / SNC 跨服互通大厅与 TX/RX 箱
