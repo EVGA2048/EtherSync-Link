@@ -103,8 +103,22 @@ public final class Store {
                       return_slots INT NOT NULL DEFAULT 1,
                       batch_id VARCHAR(36) NULL,
                       parent_id BIGINT NULL,
+                      row_index INT NULL,
+                      row_sha256 CHAR(64) NULL,
                       INDEX idx_status (status, to_code),
                       INDEX idx_batch (batch_id)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                    """);
+            s.executeUpdate("""
+                    CREATE TABLE IF NOT EXISTS link_batches (
+                      batch_id VARCHAR(36) PRIMARY KEY,
+                      from_code VARCHAR(16) NOT NULL,
+                      to_code VARCHAR(16) NOT NULL,
+                      item_count INT NOT NULL,
+                      payload_sha256 CHAR(64) NOT NULL,
+                      status VARCHAR(16) NOT NULL DEFAULT 'open',
+                      created BIGINT NOT NULL,
+                      INDEX idx_batches_status (status, created)
                     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                     """);
             s.executeUpdate("""
@@ -190,6 +204,8 @@ public final class Store {
             try { s.executeUpdate("ALTER TABLE link_queue ADD COLUMN return_slots INT NOT NULL DEFAULT 1"); } catch (Exception ignored) {}
             try { s.executeUpdate("ALTER TABLE link_queue ADD COLUMN batch_id VARCHAR(36) NULL"); } catch (Exception ignored) {}
             try { s.executeUpdate("ALTER TABLE link_queue ADD COLUMN parent_id BIGINT NULL"); } catch (Exception ignored) {}
+            try { s.executeUpdate("ALTER TABLE link_queue ADD COLUMN row_index INT NULL"); } catch (Exception ignored) {}
+            try { s.executeUpdate("ALTER TABLE link_queue ADD COLUMN row_sha256 CHAR(64) NULL"); } catch (Exception ignored) {}
             try { s.executeUpdate("ALTER TABLE link_queue ADD INDEX idx_batch (batch_id)"); } catch (Exception ignored) {}
             try { s.executeUpdate("ALTER TABLE link_chests ADD COLUMN item_filter VARCHAR(128) NOT NULL DEFAULT ''"); } catch (Exception ignored) {}
             try { s.executeUpdate("ALTER TABLE link_chests ADD COLUMN bounce_id INT NOT NULL DEFAULT 0"); } catch (Exception ignored) {}
@@ -1067,54 +1083,210 @@ public final class Store {
         }
     }
 
-    public long enqueue(String from, String to, String pair, String itemKey, String itemName, int amount,
-                        String b64, String nestedKeys, int returnSlots, String batchId, Long parentId) throws Exception {
+    public record BatchItem(String itemKey, String itemName, int amount, String b64,
+                            String nestedKeys, int returnSlots) {}
+
+    /** 行级校验：对 blob 原文 + 物品标识算 SHA-256。 */
+    public static String rowSha256(String b64, String itemKey, int amount, String nestedKeys) {
+        String data = (b64 == null ? "" : b64) + "\n"
+                + (itemKey == null ? "" : itemKey) + "\n"
+                + amount + "\n"
+                + (nestedKeys == null ? "" : nestedKeys);
+        return sha256(data);
+    }
+
+    /** 批次级校验：按行序 0..n-1 汇总各行的 row_sha256。 */
+    public static String batchSha256(List<String> rowShas) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < rowShas.size(); i++) {
+            sb.append(i).append('\n').append(rowShas.get(i)).append('\n');
+        }
+        return sha256(sb.toString());
+    }
+
+    private static String sha256(String data) {
+        try {
+            byte[] d = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(data.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder(64);
+            for (byte b : d) sb.append(Character.forDigit((b >> 4) & 0xF, 16)).append(Character.forDigit(b & 0xF, 16));
+            return sb.toString();
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    public void enqueueBatch(String from, String to, String pair, List<BatchItem> items, String batchId) throws Exception {
+        if (items == null || items.isEmpty()) return;
+        List<String> shas = new ArrayList<>(items.size());
+        for (BatchItem it : items) shas.add(rowSha256(it.b64(), it.itemKey(), it.amount(), it.nestedKeys()));
+        String batchSha = batchSha256(shas);
         try (Connection c = ds.getConnection()) {
             c.setAutoCommit(false);
             try {
-                byte[] payload = java.util.Base64.getDecoder().decode(b64);
-                List<ItemEnvelope.Escrow> escrows = ItemEnvelope.escrows(payload);
-                if (!escrows.isEmpty()) {
-                    try (PreparedStatement ep = c.prepareStatement("""
-                            INSERT IGNORE INTO link_item_escrow
-                              (token,origin_server,payload_b64,status,claim_id,claimed_at,created)
-                            VALUES (?,?,?,'active',NULL,0,?)
-                            """)) {
-                        for (ItemEnvelope.Escrow e : escrows) {
-                            ep.setString(1, e.token().toString());
-                            ep.setString(2, e.originServer());
-                            ep.setString(3, java.util.Base64.getEncoder().encodeToString(e.payload()));
-                            ep.setLong(4, System.currentTimeMillis());
-                            ep.addBatch();
-                        }
-                        ep.executeBatch();
-                    }
-                }
-                long id;
+                insertEscrows(c, items);
                 try (PreparedStatement ps = c.prepareStatement("""
                      INSERT INTO link_queue
-                       (from_code,to_code,pair_code,item_key,item_name,amount,status,blob_b64,created,nested_keys,return_slots,batch_id,parent_id)
-                     VALUES (?,?,?,?,?,?, 'pending', ?,?,?,?,?,?)
-                     """, Statement.RETURN_GENERATED_KEYS)) {
-                    ps.setString(1, from);
-                    ps.setString(2, to);
-                    ps.setString(3, pair);
-                    ps.setString(4, itemKey);
-                    ps.setString(5, itemName);
-                    ps.setInt(6, amount);
-                    ps.setString(7, b64);
-                    ps.setLong(8, System.currentTimeMillis());
-                    ps.setString(9, nestedKeys);
-                    ps.setInt(10, Math.max(1, returnSlots));
-                    ps.setString(11, batchId);
-                    if (parentId == null) ps.setNull(12, java.sql.Types.BIGINT);
-                    else ps.setLong(12, parentId);
+                       (from_code,to_code,pair_code,item_key,item_name,amount,status,blob_b64,created,nested_keys,return_slots,batch_id,parent_id,row_index,row_sha256)
+                     VALUES (?,?,?,?,?,?, 'pending', ?,?,?,?,?,NULL,?,?)
+                     """)) {
+                    for (int i = 0; i < items.size(); i++) {
+                        BatchItem it = items.get(i);
+                        ps.setString(1, from);
+                        ps.setString(2, to);
+                        ps.setString(3, pair);
+                        ps.setString(4, it.itemKey());
+                        ps.setString(5, it.itemName());
+                        ps.setInt(6, it.amount());
+                        ps.setString(7, it.b64());
+                        ps.setLong(8, System.currentTimeMillis());
+                        ps.setString(9, it.nestedKeys());
+                        ps.setInt(10, Math.max(1, it.returnSlots()));
+                        ps.setString(11, batchId);
+                        ps.setInt(12, i);
+                        ps.setString(13, shas.get(i));
+                        ps.addBatch();
+                    }
+                    ps.executeBatch();
+                }
+                try (PreparedStatement ps = c.prepareStatement("""
+                     INSERT INTO link_batches
+                       (batch_id,from_code,to_code,item_count,payload_sha256,status,created)
+                     VALUES (?,?,?,?,?,'open',?)
+                     """)) {
+                    ps.setString(1, batchId);
+                    ps.setString(2, from);
+                    ps.setString(3, to);
+                    ps.setInt(4, items.size());
+                    ps.setString(5, batchSha);
+                    ps.setLong(6, System.currentTimeMillis());
                     ps.executeUpdate();
-                    ResultSet k = ps.getGeneratedKeys();
-                    id = k.next() ? k.getLong(1) : 0;
                 }
                 c.commit();
-                return id;
+            } catch (Exception e) {
+                try { c.rollback(); } catch (Exception ignored) {}
+                throw e;
+            } finally {
+                try { c.setAutoCommit(true); } catch (Exception ignored) {}
+            }
+        }
+    }
+
+    /** 旧签名兼容：单行入队，也顺手生成一个 count=1 的批次校验。 */
+    public long enqueue(String from, String to, String pair, String itemKey, String itemName, int amount,
+                        String b64, String nestedKeys, int returnSlots, String batchId, Long parentId) throws Exception {
+        String useBatch = batchId == null || batchId.isBlank() ? java.util.UUID.randomUUID().toString() : batchId;
+        enqueueBatch(from, to, pair, List.of(new BatchItem(itemKey, itemName, amount, b64, nestedKeys, returnSlots)), useBatch);
+        try (Connection c = ds.getConnection();
+             PreparedStatement ps = c.prepareStatement(
+                     "SELECT MAX(id) FROM link_queue WHERE batch_id=?")) {
+            ps.setString(1, useBatch);
+            ResultSet r = ps.executeQuery();
+            return r.next() ? r.getLong(1) : 0;
+        }
+    }
+
+    private void insertEscrows(Connection c, List<BatchItem> items) throws Exception {
+        for (BatchItem it : items) {
+            byte[] payload = java.util.Base64.getDecoder().decode(it.b64());
+            List<ItemEnvelope.Escrow> escrows = ItemEnvelope.escrows(payload);
+            if (escrows.isEmpty()) continue;
+            try (PreparedStatement ep = c.prepareStatement("""
+                    INSERT IGNORE INTO link_item_escrow
+                      (token,origin_server,payload_b64,status,claim_id,claimed_at,created)
+                    VALUES (?,?,?,'active',NULL,0,?)
+                    """)) {
+                for (ItemEnvelope.Escrow e : escrows) {
+                    ep.setString(1, e.token().toString());
+                    ep.setString(2, e.originServer());
+                    ep.setString(3, java.util.Base64.getEncoder().encodeToString(e.payload()));
+                    ep.setLong(4, System.currentTimeMillis());
+                    ep.addBatch();
+                }
+                ep.executeBatch();
+            }
+        }
+    }
+
+    /** 校验 to_code 下所有 open 状态的批次；不通过就整批 quarantine。 */
+    public void verifyBatches(String toCode) throws Exception {
+        List<String> batchIds = new ArrayList<>();
+        try (Connection c = ds.getConnection();
+             PreparedStatement ps = c.prepareStatement("""
+                     SELECT DISTINCT q.batch_id
+                     FROM link_queue q JOIN link_batches b ON b.batch_id=q.batch_id
+                     WHERE q.status='pending' AND q.to_code=? AND b.status='open'
+                     LIMIT 16
+                     """)) {
+            ps.setString(1, toCode);
+            ResultSet rs = ps.executeQuery();
+            while (rs.next()) batchIds.add(rs.getString(1));
+        }
+        for (String batchId : batchIds) verifyBatch(batchId);
+    }
+
+    private record BatchRow(long id, int index, String sha, String b64,
+                            String itemKey, int amount, String nestedKeys) {}
+
+    private void verifyBatch(String batchId) throws Exception {
+        int count;
+        String batchSha;
+        try (Connection c = ds.getConnection();
+             PreparedStatement ps = c.prepareStatement(
+                     "SELECT item_count,payload_sha256 FROM link_batches WHERE batch_id=?")) {
+            ps.setString(1, batchId);
+            ResultSet r = ps.executeQuery();
+            if (!r.next()) return;
+            count = r.getInt(1);
+            batchSha = r.getString(2);
+        }
+        List<BatchRow> rows = new ArrayList<>();
+        try (Connection c = ds.getConnection();
+             PreparedStatement ps = c.prepareStatement("""
+                     SELECT id,row_index,row_sha256,blob_b64,item_key,amount,nested_keys
+                     FROM link_queue WHERE batch_id=? ORDER BY row_index,id
+                     """)) {
+            ps.setString(1, batchId);
+            ResultSet r = ps.executeQuery();
+            while (r.next()) {
+                rows.add(new BatchRow(r.getLong(1), r.getInt(2), r.getString(3),
+                        r.getString(4), r.getString(5), r.getInt(6), nz(r, "nested_keys")));
+            }
+        }
+        boolean ok = rows.size() == count;
+        List<String> shas = new ArrayList<>(rows.size());
+        if (ok) {
+            for (int i = 0; i < rows.size(); i++) {
+                BatchRow row = rows.get(i);
+                String sha = row.sha() == null ? "" : row.sha().trim();
+                String calc = rowSha256(row.b64(), row.itemKey(), row.amount(), row.nestedKeys());
+                if (row.index() != i || sha.isBlank() || !sha.equalsIgnoreCase(calc)) {
+                    ok = false;
+                    break;
+                }
+                shas.add(sha.toLowerCase(java.util.Locale.ROOT));
+            }
+        }
+        if (ok) {
+            ok = batchSha256(shas).equalsIgnoreCase(batchSha == null ? "" : batchSha.trim());
+        }
+        try (Connection c = ds.getConnection()) {
+            c.setAutoCommit(false);
+            try {
+                try (PreparedStatement ps = c.prepareStatement(
+                        "UPDATE link_batches SET status=? WHERE batch_id=?")) {
+                    ps.setString(1, ok ? "ok" : "quarantine");
+                    ps.setString(2, batchId);
+                    ps.executeUpdate();
+                }
+                if (!ok) {
+                    try (PreparedStatement ps = c.prepareStatement(
+                            "UPDATE link_queue SET status='quarantine' WHERE batch_id=? AND status='pending'")) {
+                        ps.setString(1, batchId);
+                        ps.executeUpdate();
+                    }
+                }
+                c.commit();
             } catch (Exception e) {
                 try { c.rollback(); } catch (Exception ignored) {}
                 throw e;
@@ -1125,11 +1297,17 @@ public final class Store {
     }
 
     public List<Models.QueueRow> pendingTo(String toCode) throws Exception {
+        verifyBatches(toCode);
         List<Models.QueueRow> out = new ArrayList<>();
         try (Connection c = ds.getConnection();
              PreparedStatement ps = c.prepareStatement("""
                      SELECT id,from_code,to_code,pair_code,item_key,item_name,amount,status,blob_b64,nested_keys
-                     FROM link_queue WHERE status='pending' AND to_code=? LIMIT 48
+                     FROM link_queue q
+                     WHERE q.status='pending' AND q.to_code=?
+                       AND (q.batch_id IS NULL
+                            OR NOT EXISTS (SELECT 1 FROM link_batches b WHERE b.batch_id=q.batch_id)
+                            OR EXISTS (SELECT 1 FROM link_batches b WHERE b.batch_id=q.batch_id AND b.status='ok'))
+                     LIMIT 48
                      """)) {
             ps.setString(1, toCode);
             ResultSet rs = ps.executeQuery();

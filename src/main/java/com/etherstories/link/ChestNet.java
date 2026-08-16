@@ -648,17 +648,17 @@ public final class ChestNet {
                     return;
                 }
                 String batchId = java.util.UUID.randomUUID().toString();
-                List<Integer> queued = new ArrayList<>();
+                List<Store.BatchItem> batchItems = new ArrayList<>();
                 for (int i = 0; i < prepared.size(); i++) {
-                    plugin.store().enqueue(plugin.serverCode(), dest.serverCode(), tx.pairCode(),
-                            keys.get(i), names.get(i), amounts.get(i),
-                            blobs.get(i), nested.get(i), returnSlots.get(i), batchId, null);
-                    queued.add(i);
+                    batchItems.add(new Store.BatchItem(keys.get(i), names.get(i), amounts.get(i),
+                            blobs.get(i), nested.get(i), returnSlots.get(i)));
                     LinkLog.debug("发 " + keys.get(i) + " x" + amounts.get(i)
                             + " " + tx.unit() + ">" + dest.serverCode() + " " + kinds.get(i));
                 }
+                plugin.store().enqueueBatch(plugin.serverCode(), dest.serverCode(), tx.pairCode(),
+                        batchItems, batchId);
                 Bukkit.getScheduler().runTask(plugin, () -> {
-                    for (int i : queued) {
+                    for (int i = 0; i < prepared.size(); i++) {
                         ItemStack send = prepared.get(i);
                         int removeSlot = preparedSlots.get(i);
                         ItemStack now = inv.getItem(removeSlot);
