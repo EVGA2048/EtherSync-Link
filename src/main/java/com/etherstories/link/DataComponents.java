@@ -100,55 +100,88 @@ public final class DataComponents {
         return found;
     }
 
+    private static volatile Object dcRegCache;
+    private static volatile boolean dcRegProbed;
+
+    /** 拿到含模组组件的全量 DataComponentType 注册表；静态字段在混合端可能只有原版。 */
+    private static Object dataComponentRegistry() {
+        if (dcRegProbed) return dcRegCache;
+        Object reg = null;
+        try {
+            Object ra = ItemNbt.registryAccess();
+            if (ra != null) {
+                Object rk = Class.forName("net.minecraft.core.registries.Registries")
+                        .getField("DATA_COMPONENT_TYPE").get(null);
+                if (rk != null) reg = invoke(ra, "registryOrThrow", rk);
+            }
+        } catch (Throwable ignored) {
+        }
+        if (reg == null) {
+            try {
+                reg = Class.forName("net.minecraft.core.registries.BuiltInRegistries")
+                        .getField("DATA_COMPONENT_TYPE").get(null);
+            } catch (Throwable ignored) {
+            }
+        }
+        dcRegCache = reg;
+        dcRegProbed = true;
+        return reg;
+    }
+
     private static Map<String, Object> index() {
         Map<String, Object> idx = typeIndex;
         if (idx != null) return idx;
         synchronized (DataComponents.class) {
             if (typeIndex != null) return typeIndex;
             Map<String, Object> built = new HashMap<>();
-            try {
-                Object reg = Class.forName("net.minecraft.core.registries.BuiltInRegistries")
-                        .getField("DATA_COMPONENT_TYPE").get(null);
-                if (reg instanceof Iterable<?> it) {
-                    for (Object type : it) {
-                        if (type == null) continue;
-                        String name = nameOf(type);
-                        if (name.indexOf(':') > 0) built.putIfAbsent(name.toLowerCase(Locale.ROOT), type);
-                    }
-                }
-            } catch (Throwable ignored) {
-            }
+            indexByEntries(built, dataComponentRegistry());
             typeIndex = Map.copyOf(built);
             return typeIndex;
+        }
+    }
+
+    /** entrySet 反查：NeoForge 上 MappedRegistry 的 key→value 最可靠（与 ItemKeys 同款）。 */
+    private static void indexByEntries(Map<String, Object> idx, Object reg) {
+        if (reg == null) return;
+        Object entries;
+        try {
+            entries = Reflect.method(reg.getClass(), "entrySet").invoke(reg);
+        } catch (Throwable t) {
+            return;
+        }
+        if (!(entries instanceof java.util.Set<?> set)) return;
+        Method location = null;
+        for (Object o : set) {
+            if (!(o instanceof java.util.Map.Entry<?, ?> e)) continue;
+            Object type = unwrapHolder(e.getValue());
+            if (type == null) continue;
+            Object rk = e.getKey();
+            if (rk == null) continue;
+            if (location == null && !(rk instanceof String)) {
+                try { location = Reflect.method(rk.getClass(), "location"); } catch (Throwable ignored) {}
+            }
+            Object rl = rk;
+            if (location != null) {
+                try {
+                    Object v = location.invoke(rk);
+                    if (v != null) rl = v;
+                } catch (Throwable ignored) {
+                }
+            }
+            String key = String.valueOf(rl).toLowerCase(Locale.ROOT);
+            if (key.indexOf(':') <= 0) continue;
+            idx.putIfAbsent(key, type);
         }
     }
 
     /** DataComponentType 的注册名：注册表反查 getKey，避免依赖不可靠的 toString。 */
     private static String nameOf(Object type) {
         if (type == null) return "";
-        try {
-            Object reg = Class.forName("net.minecraft.core.registries.BuiltInRegistries")
-                    .getField("DATA_COMPONENT_TYPE").get(null);
-            Object rl = invoke(reg, "getKey", type);
-            if (rl != null) {
-                String s = String.valueOf(rl);
-                if (s.indexOf(':') > 0) return s;
-            }
-        } catch (Throwable ignored) {
-        }
-        for (String cls : new String[]{
-                "net.neoforged.neoforge.registries.ForgeRegistries",
-                "net.minecraftforge.registries.ForgeRegistries"
-        }) {
-            try {
-                Object reg = Class.forName(cls).getField("DATA_COMPONENT_TYPES").get(null);
-                Object rl = invoke(reg, "getKey", type);
-                if (rl != null) {
-                    String s = String.valueOf(rl);
-                    if (s.indexOf(':') > 0) return s;
-                }
-            } catch (Throwable ignored) {
-            }
+        Object reg = dataComponentRegistry();
+        Object rl = invoke(reg, "getKey", type);
+        if (rl != null) {
+            String s = String.valueOf(rl);
+            if (s.indexOf(':') > 0) return s;
         }
         return String.valueOf(type);
     }
@@ -156,27 +189,10 @@ public final class DataComponents {
     private static Object lookup(String id) {
         Object rl = resourceLocation(id);
         if (rl == null) return null;
-        try {
-            Object reg = Class.forName("net.minecraft.core.registries.BuiltInRegistries")
-                    .getField("DATA_COMPONENT_TYPE").get(null);
-            Object r = invoke(reg, "get", rl);
-            if (r instanceof java.util.Optional<?> o) r = o.orElse(null);
-            if (r != null) return unwrapHolder(r);
-        } catch (Throwable ignored) {
-        }
-        for (String cls : new String[]{
-                "net.neoforged.neoforge.registries.ForgeRegistries",
-                "net.minecraftforge.registries.ForgeRegistries"
-        }) {
-            try {
-                Object reg = Class.forName(cls).getField("DATA_COMPONENT_TYPES").get(null);
-                Object r = invoke(reg, "getValue", rl);
-                if (r == null) r = invoke(reg, "get", rl);
-                if (r != null) return unwrapHolder(r);
-            } catch (Throwable ignored) {
-            }
-        }
-        return null;
+        Object reg = dataComponentRegistry();
+        Object r = invoke(reg, "get", rl);
+        if (r instanceof java.util.Optional<?> o) r = o.orElse(null);
+        return r == null ? null : unwrapHolder(r);
     }
 
     /** 物品自带组件表：每项是 [type, value]。 */

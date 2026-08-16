@@ -454,7 +454,7 @@ public final class ItemNbt {
     private static volatile Object registryAccessCache;
 
     /** 每件物品都要用，别每次重新 Class.forName 一遍服务端。 */
-    private static Object registryAccess() {
+    static Object registryAccess() {
         Object cached = registryAccessCache;
         if (cached != null) return cached;
         Object found = findRegistryAccess();
