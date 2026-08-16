@@ -504,20 +504,30 @@ public final class NestedItems {
             String ns = s.substring(0, i);
             String path = s.substring(i + 1);
             if (SKIP_NS.contains(ns)) return;
-            // minecraft 命名空间只认真实存在的原版 Material，避免 NBT 里
-            // create_clipboard 这类字符串被拼成 minecraft:create_clipboard。
+            if (path.isBlank()) return;
             if (ns.equals("minecraft")) {
+                // Youer 会给模组物品动态注册 Bukkit Material（名称如 CREATE_WRENCH），
+                // matchMaterial("create_wrench") 会命中它，但它的真实 key 是 create:wrench。
+                // 这里必须用 Material 自己的 key，不能再拼 minecraft:create_wrench。
                 org.bukkit.Material mat = org.bukkit.Material.matchMaterial(path);
                 if (mat == null || mat.isAir()) return;
-            } else if (path.isBlank()) {
-                return;
+                addMaterialKey(mat, out);
+            } else if (ItemKeys.usable(s)) {
+                out.add(s);
             }
-            if (ItemKeys.usable(s)) out.add(s);
             return;
         }
-        // 没有命名空间：只把真实原版 Material 补成 minecraft:*，模组短名不再乱猜。
+        // 没有命名空间：同样只认 Material 自己的 key，不硬拼 minecraft 前缀。
         org.bukkit.Material mat = org.bukkit.Material.matchMaterial(s);
-        if (mat != null && !mat.isAir()) out.add("minecraft:" + s);
+        if (mat != null && !mat.isAir()) addMaterialKey(mat, out);
+    }
+
+    private static void addMaterialKey(org.bukkit.Material mat, Set<String> out) {
+        try {
+            String key = mat.getKey().toString().toLowerCase(Locale.ROOT);
+            if (ItemKeys.usable(key)) out.add(key);
+        } catch (Throwable ignored) {
+        }
     }
 
     static String legacyCustomName(Object nms) {
