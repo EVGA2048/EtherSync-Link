@@ -221,9 +221,11 @@ public final class ItemNbt {
                 return null;
             }
             Object regs = registryAccess();
-            // 带模组数据组件的物品优先走 NBT/codec：STREAM_CODEC 在部分混合端
-            // 上可能不带模组组件，导致 create:package_contents 之类内容被静默丢弃。
-            if (DataComponents.modded(item)) {
+            String itemId = ItemKeys.id(item);
+            boolean nonVanilla = ItemKeys.usable(itemId) && !itemId.startsWith("minecraft:");
+            // 带模组数据组件的物品、以及所有非原版物品，都优先走 NBT/codec。
+            // STREAM_CODEC 在混合端上可能用注册表数字 ID，跨服 ID 布局不同会解错或解不出。
+            if (DataComponents.modded(item) || nonVanilla) {
                 Object tag = saveTag(nms, regs, err);
                 if (tag == null) tag = saveCodecTag(nms, regs, err);
                 if (tag != null) {
