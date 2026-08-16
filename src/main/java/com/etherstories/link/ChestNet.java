@@ -26,7 +26,7 @@ public final class ChestNet {
     private final Set<Integer> txBusy = ConcurrentHashMap.newKeySet();
     private final Set<Long> qBusy = ConcurrentHashMap.newKeySet();
     private final Map<Integer, String> signSnap = new ConcurrentHashMap<>();
-    private final Map<Integer, Long> heavyReadyAt = new ConcurrentHashMap<>();
+    private final Map<Integer, Long> sendReadyAt = new ConcurrentHashMap<>();
     private final Map<Integer, String> savedFace = new ConcurrentHashMap<>();
     private final java.util.Set<String> lackNotified = ConcurrentHashMap.newKeySet();
     private volatile List<Models.ChestRow> cached = List.of();
@@ -51,12 +51,15 @@ public final class ChestNet {
                                 refreshSign(c);
                                 signSnap.put(c.id(), snap);
                             }
-                            if ("TX".equals(c.role()) && c.pairCode() != null && !c.pairCode().isBlank()
+                            if (plugin.transportEnabled()
+                                    && "TX".equals(c.role()) && c.pairCode() != null && !c.pairCode().isBlank()
                                     && !"paused".equals(c.status())) {
                                 drainTx(c);
                             }
                         }
-                        for (var q : pending) deliver(q);
+                        if (plugin.transportEnabled()) {
+                            for (var q : pending) deliver(q);
+                        }
                         for (var q : bounced) returnBounce(q);
                     } finally {
                         scanning.set(false);
@@ -344,24 +347,73 @@ public final class ChestNet {
     }
 
     /**
-     * 发货前置检查：对面注册表里没有这个物品就别收走，省掉发出去再退回来那一圈。
+     * 发货前置检查：对面注册表里没有这个物品则返回缺失键，否则 null。
      * 清单没同步到时一律放行——没数据不能成为卡住发货的理由。
      */
-    private boolean peerLacks(Models.ChestRow tx, ItemStack it) {
+    private String peerLacks(Models.ChestRow tx, ItemStack it) {
         String pair = tx.pairCode();
-        if (pair == null || pair.isBlank()) return false;
+        if (pair == null || pair.isBlank()) return null;
         String peer = otherServer(pair);
-        if (peer == null || peer.isBlank() || "?".equals(peer)) return false;
-        if (!Compat.haveList(peer)) return false;
-        String miss = Compat.firstMissing(peer, Items.itemKey(it), NestedItems.csv(it));
-        if (miss == null) return false;
-        if (lackNotified.add(tx.id() + "|" + miss)) {
-            plugin.getLogger().info("发货前置检查拦下 " + Items.itemKey(it)
-                    + "：" + peer + " 没有 " + miss);
-            plugin.alerts().nodeFault("chest", tx, "hold",
-                    plugin.prettyName(peer) + "没有 " + miss);
+        if (peer == null || peer.isBlank() || "?".equals(peer)) return null;
+        if (!Compat.haveList(peer)) return null;
+        return Compat.firstMissing(peer, Items.itemKey(it), NestedItems.csv(it));
+    }
+
+    /** 物品身上是否带着被管理员禁用的数据组件；命中返回组件 ID。 */
+    private String blockedComponent(ItemStack it) {
+        if (it == null) return null;
+        for (String comp : DataComponents.names(it)) {
+            if (plugin.componentBlocked(comp)) return comp;
         }
-        return true;
+        return null;
+    }
+
+    /** 从内存缓存里找本服 TX 绑定的回退箱（避免在主线程打 DB）。 */
+    private Models.ChestRow bounceChest(Models.ChestRow tx) {
+        if (tx == null || tx.bounceId() <= 0) return null;
+        for (Models.ChestRow c : cached) {
+            if (c.id() == tx.bounceId()) return c;
+        }
+        return null;
+    }
+
+    /** 发送前把不兼容/被禁用的物品从 TX 挪进回退箱。 */
+    private void moveToBounce(Models.ChestRow tx, ItemStack item, int slot, String why) {
+        Block tb = block(tx);
+        if (tb == null || !(tb.getState() instanceof Chest chest)) return;
+        Inventory inv = ChestListener.chestInv(chest);
+        ItemStack now = inv.getItem(slot);
+        if (now == null || !now.isSimilar(item)) return;
+        Models.ChestRow bk = bounceChest(tx);
+        if (bk == null) {
+            notifyReject(tx, item, why + "（未绑定回退箱，留在发送箱）");
+            return;
+        }
+        Block bb = block(bk);
+        if (bb == null || !(bb.getState() instanceof Chest bchest)) {
+            notifyReject(tx, item, why + "（回退箱失效，留在发送箱）");
+            return;
+        }
+        Inventory bInv = ChestListener.chestInv(bchest);
+        if (bInv.addItem(now).isEmpty()) {
+            inv.setItem(slot, null);
+            notifyReject(tx, item, why + "（已退回回退箱）");
+        } else {
+            notifyReject(tx, item, why + "（回退箱已满，留在发送箱）");
+        }
+    }
+
+    /** 聊天栏通报（箱主 + 管理员）+ 控制台 + 节点告警，按箱+物品+原因去重。 */
+    private void notifyReject(Models.ChestRow tx, ItemStack item, String why) {
+        String key = Items.itemKey(item);
+        if (!lackNotified.add(tx.id() + "|reject|" + key + "|" + why)) return;
+        plugin.getLogger().info("拦截 " + key + "：" + why);
+        if (tx.owner() != null) {
+            Player owner = Bukkit.getPlayer(tx.owner());
+            if (owner != null && owner.isOnline()) plugin.msg(owner, "&c" + key + " " + why);
+        }
+        plugin.notifyAdmins("&c" + key + " " + why);
+        plugin.alerts().nodeFault("chest", tx, "bounce", key + " " + why);
     }
 
     private String otherServer(String pair) {
@@ -372,24 +424,28 @@ public final class ChestNet {
     }
 
     private int waitSec(int chestId) {
-        Long at = heavyReadyAt.get(chestId);
+        Long at = sendReadyAt.get(chestId);
         if (at == null) return 0;
         long left = at - System.currentTimeMillis();
         if (left <= 0) return 0;
         return (int) Math.ceil(left / 1000.0);
     }
 
-    private boolean takeHeaviesNow(Models.ChestRow tx, List<ItemStack> heavies) {
-        int delay = heavyDelaySec(heavies);
-        if (delay <= 0) return true;
+    /** 统一发货倒计时：到点返回 true 并清空计时，让整批一起发。 */
+    private boolean takeBatchNow(Models.ChestRow tx, int delaySec) {
+        if (delaySec <= 0) return true;
         long now = System.currentTimeMillis();
-        Long ready = heavyReadyAt.get(tx.id());
+        Long ready = sendReadyAt.get(tx.id());
         if (ready == null) {
-            heavyReadyAt.put(tx.id(), now + delay * 1000L);
+            sendReadyAt.put(tx.id(), now + delaySec * 1000L);
             refreshSign(tx);
             return false;
         }
-        return now >= ready;
+        if (now >= ready) {
+            sendReadyAt.remove(tx.id());
+            return true;
+        }
+        return false;
     }
 
     private int heavyDelaySec(List<ItemStack> heavies) {
@@ -458,13 +514,29 @@ public final class ChestNet {
         List<Integer> lightSlots = new ArrayList<>();
         List<ItemStack> heavies = new ArrayList<>();
         List<Integer> heavySlots = new ArrayList<>();
+        List<ItemStack> rejected = new ArrayList<>();
+        List<Integer> rejectedSlots = new ArrayList<>();
+        List<String> rejectedWhy = new ArrayList<>();
         for (int i = 0; i < contents.length; i++) {
             ItemStack it = contents[i];
             if (!ItemKeys.real(it)) continue;
             if (Items.hopperLocked(plugin, it)) continue;
             if (!plugin.allowed(it)) continue;
             if (!Items.passFilter(Items.itemKey(it), tx.itemFilter())) continue;
-            if (peerLacks(tx, it)) continue;
+            String blocked = blockedComponent(it);
+            if (blocked != null) {
+                rejected.add(it.clone());
+                rejectedSlots.add(i);
+                rejectedWhy.add("组件被禁用 " + blocked);
+                continue;
+            }
+            String miss = peerLacks(tx, it);
+            if (miss != null) {
+                rejected.add(it.clone());
+                rejectedSlots.add(i);
+                rejectedWhy.add("对端没有 " + miss);
+                continue;
+            }
             boolean heavy = NestedItems.containerLike(Items.itemKey(it));
             if (heavy && !NestedItems.emptyBox(it) && !ContainerSupport.allow(Items.itemKey(it))) continue;
             if (heavy) {
@@ -475,6 +547,21 @@ public final class ChestNet {
                 lightSlots.add(i);
             }
         }
+        // 不兼容 / 被禁用：发送前退回回退箱并通报。
+        for (int j = 0; j < rejected.size(); j++) {
+            moveToBounce(tx, rejected.get(j), rejectedSlots.get(j), rejectedWhy.get(j));
+        }
+        if (lights.isEmpty() && heavies.isEmpty()) {
+            if (sendReadyAt.remove(tx.id()) != null) refreshSign(tx);
+            txBusy.remove(tx.id());
+            return;
+        }
+        int delaySec = plugin.chestBatchDelaySeconds();
+        if (!heavies.isEmpty()) delaySec += heavyDelaySec(heavies);
+        if (!takeBatchNow(tx, delaySec)) {
+            txBusy.remove(tx.id());
+            return;
+        }
         List<ItemStack> sends = new ArrayList<>();
         List<Integer> slots = new ArrayList<>();
         int room = n;
@@ -484,15 +571,10 @@ public final class ChestNet {
             slots.add(lightSlots.get(i));
         }
         room -= takeL;
-        if (heavies.isEmpty()) {
-            if (heavyReadyAt.remove(tx.id()) != null) refreshSign(tx);
-        } else if (takeHeaviesNow(tx, heavies) && room > 0) {
-            int takeH = Math.min(heavies.size(), room);
-            for (int i = 0; i < takeH; i++) {
-                sends.add(heavies.get(i));
-                slots.add(heavySlots.get(i));
-            }
-            heavyReadyAt.remove(tx.id());
+        int takeH = Math.min(heavies.size(), room);
+        for (int i = 0; i < takeH; i++) {
+            sends.add(heavies.get(i));
+            slots.add(heavySlots.get(i));
         }
         if (sends.isEmpty()) {
             txBusy.remove(tx.id());
@@ -569,11 +651,12 @@ public final class ChestNet {
                     txBusy.remove(tx.id());
                     return;
                 }
+                String batchId = java.util.UUID.randomUUID().toString();
                 List<Integer> queued = new ArrayList<>();
                 for (int i = 0; i < prepared.size(); i++) {
                     plugin.store().enqueue(plugin.serverCode(), dest.serverCode(), tx.pairCode(),
                             keys.get(i), names.get(i), amounts.get(i),
-                            blobs.get(i), nested.get(i), returnSlots.get(i));
+                            blobs.get(i), nested.get(i), returnSlots.get(i), batchId, null);
                     queued.add(i);
                     LinkLog.debug("发 " + keys.get(i) + " x" + amounts.get(i)
                             + " " + tx.unit() + ">" + dest.serverCode() + " " + kinds.get(i));
@@ -699,6 +782,13 @@ public final class ChestNet {
                     finishEscrows(escrow, false);
                     bounce(q, "本服重建容器失败，交还发送端");
                     return;
+                }
+                for (String comp : DataComponents.names(decoded)) {
+                    if (plugin.componentBlocked(comp)) {
+                        finishEscrows(escrow, false);
+                        bounce(q, "组件被禁用 " + comp);
+                        return;
+                    }
                 }
                 var inv = ChestListener.chestInv(chest);
                 ItemStack[] snap = inv.getContents();

@@ -24,6 +24,8 @@ public final class ESLinkPlugin extends JavaPlugin {
     private final Set<java.util.UUID> guideWelcomed = ConcurrentHashMap.newKeySet();
     private final java.util.Map<String, Models.ServerRow> serverCache = new ConcurrentHashMap<>();
     private volatile boolean ioEnabled = true;
+    private volatile boolean transportEnabled = true;
+    private final Set<String> blockedComponents = ConcurrentHashMap.newKeySet();
 
     @Override
     public void onEnable() {
@@ -44,6 +46,7 @@ public final class ESLinkPlugin extends JavaPlugin {
             saveDefaultConfig();
             ConfigUpdater.migrate(this);
             ensureCore();
+            loadTransportState();
             vault.hook();
             ContainerSupport.configure(getConfig().getString("chest.containers", "auto"));
             ContainerSupport.scheduleProbe(this);
@@ -79,6 +82,50 @@ public final class ESLinkPlugin extends JavaPlugin {
         if (alerts == null) alerts = new AlertNet(this);
     }
 
+    /** 从 config 加载急停开关与组件黑名单（重启/重载后仍生效）。 */
+    private void loadTransportState() {
+        transportEnabled = getConfig().getBoolean("transport.enabled", true);
+        blockedComponents.clear();
+        for (String s : getConfig().getStringList("blocked-components")) {
+            if (s != null && !s.isBlank()) blockedComponents.add(s.trim().toLowerCase(Locale.ROOT));
+        }
+    }
+
+    public boolean transportEnabled() { return transportEnabled; }
+
+    public void setTransportEnabled(boolean v) {
+        transportEnabled = v;
+        getConfig().set("transport.enabled", v);
+        saveConfig();
+    }
+
+    public boolean componentBlocked(String id) {
+        if (id == null || id.isBlank()) return false;
+        return blockedComponents.contains(id.trim().toLowerCase(Locale.ROOT));
+    }
+
+    public java.util.Set<String> blockedComponentIds() {
+        return Set.copyOf(blockedComponents);
+    }
+
+    public void blockComponent(String id) {
+        if (id == null || id.isBlank()) return;
+        blockedComponents.add(id.trim().toLowerCase(Locale.ROOT));
+        getConfig().set("blocked-components", new java.util.ArrayList<>(blockedComponents));
+        saveConfig();
+    }
+
+    public void unblockComponent(String id) {
+        if (id == null) return;
+        blockedComponents.remove(id.trim().toLowerCase(Locale.ROOT));
+        getConfig().set("blocked-components", new java.util.ArrayList<>(blockedComponents));
+        saveConfig();
+    }
+
+    public int chestBatchDelaySeconds() {
+        return Math.max(0, Math.min(60, getConfig().getInt("chest.batch-delay-seconds", 3)));
+    }
+
     private void registerChatListener() {
         String core = Bukkit.getName() + " " + Bukkit.getVersion();
         boolean hybrid = core.toLowerCase(Locale.ROOT).contains("arclight")
@@ -109,6 +156,7 @@ public final class ESLinkPlugin extends JavaPlugin {
             reloadConfig();
             ConfigUpdater.migrate(this);
             ensureCore();
+            loadTransportState();
             vault.hook();
             ContainerSupport.configure(getConfig().getString("chest.containers", "auto"));
             ContainerSupport.clearTrip();
@@ -136,6 +184,8 @@ public final class ESLinkPlugin extends JavaPlugin {
                 if (store != null && store.ready()) {
                     store.heartbeat(serverCode(), serverName(), serverBlurb(), serverColor(), serverIcon());
                     rememberServers(store.servers());
+                    Compat.publish(this);
+                    Compat.refresh(this);
                 }
             } catch (Exception e) {
                 getLogger().warning("心跳失败: " + e.getMessage());

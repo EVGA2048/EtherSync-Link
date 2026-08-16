@@ -101,7 +101,10 @@ public final class Store {
                       blob_b64 MEDIUMTEXT,
                       created BIGINT NOT NULL,
                       return_slots INT NOT NULL DEFAULT 1,
-                      INDEX idx_status (status, to_code)
+                      batch_id VARCHAR(36) NULL,
+                      parent_id BIGINT NULL,
+                      INDEX idx_status (status, to_code),
+                      INDEX idx_batch (batch_id)
                     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                     """);
             s.executeUpdate("""
@@ -185,6 +188,9 @@ public final class Store {
             try { s.executeUpdate("UPDATE link_io SET level=15 WHERE powered<>0 AND level=0"); } catch (Exception ignored) {}
             try { s.executeUpdate("ALTER TABLE link_queue ADD COLUMN nested_keys TEXT NULL"); } catch (Exception ignored) {}
             try { s.executeUpdate("ALTER TABLE link_queue ADD COLUMN return_slots INT NOT NULL DEFAULT 1"); } catch (Exception ignored) {}
+            try { s.executeUpdate("ALTER TABLE link_queue ADD COLUMN batch_id VARCHAR(36) NULL"); } catch (Exception ignored) {}
+            try { s.executeUpdate("ALTER TABLE link_queue ADD COLUMN parent_id BIGINT NULL"); } catch (Exception ignored) {}
+            try { s.executeUpdate("ALTER TABLE link_queue ADD INDEX idx_batch (batch_id)"); } catch (Exception ignored) {}
             try { s.executeUpdate("ALTER TABLE link_chests ADD COLUMN item_filter VARCHAR(128) NOT NULL DEFAULT ''"); } catch (Exception ignored) {}
             try { s.executeUpdate("ALTER TABLE link_chests ADD COLUMN bounce_id INT NOT NULL DEFAULT 0"); } catch (Exception ignored) {}
             try { s.executeUpdate("ALTER TABLE link_chests ADD COLUMN sign_face VARCHAR(16) NULL"); } catch (Exception ignored) {}
@@ -212,6 +218,15 @@ public final class Store {
                       detail VARCHAR(256) NOT NULL,
                       created BIGINT NOT NULL,
                       INDEX idx_alert_id (id)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                    """);
+            s.executeUpdate("""
+                    CREATE TABLE IF NOT EXISTS link_registry (
+                      server_code VARCHAR(16) PRIMARY KEY,
+                      digest VARCHAR(40) NOT NULL,
+                      item_count INT NOT NULL,
+                      payload MEDIUMBLOB,
+                      updated BIGINT NOT NULL
                     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                     """);
         }
@@ -1053,7 +1068,7 @@ public final class Store {
     }
 
     public long enqueue(String from, String to, String pair, String itemKey, String itemName, int amount,
-                        String b64, String nestedKeys, int returnSlots) throws Exception {
+                        String b64, String nestedKeys, int returnSlots, String batchId, Long parentId) throws Exception {
         try (Connection c = ds.getConnection()) {
             c.setAutoCommit(false);
             try {
@@ -1078,8 +1093,8 @@ public final class Store {
                 long id;
                 try (PreparedStatement ps = c.prepareStatement("""
                      INSERT INTO link_queue
-                       (from_code,to_code,pair_code,item_key,item_name,amount,status,blob_b64,created,nested_keys,return_slots)
-                     VALUES (?,?,?,?,?,?, 'pending', ?,?,?,?)
+                       (from_code,to_code,pair_code,item_key,item_name,amount,status,blob_b64,created,nested_keys,return_slots,batch_id,parent_id)
+                     VALUES (?,?,?,?,?,?, 'pending', ?,?,?,?,?,?)
                      """, Statement.RETURN_GENERATED_KEYS)) {
                     ps.setString(1, from);
                     ps.setString(2, to);
@@ -1091,6 +1106,9 @@ public final class Store {
                     ps.setLong(8, System.currentTimeMillis());
                     ps.setString(9, nestedKeys);
                     ps.setInt(10, Math.max(1, returnSlots));
+                    ps.setString(11, batchId);
+                    if (parentId == null) ps.setNull(12, java.sql.Types.BIGINT);
+                    else ps.setLong(12, parentId);
                     ps.executeUpdate();
                     ResultSet k = ps.getGeneratedKeys();
                     id = k.next() ? k.getLong(1) : 0;
@@ -1144,8 +1162,8 @@ public final class Store {
                 if (rejected != null && !rejected.isEmpty()) {
                     try (PreparedStatement ps = c.prepareStatement("""
                             INSERT INTO link_queue
-                              (from_code,to_code,pair_code,item_key,item_name,amount,status,blob_b64,created,nested_keys)
-                            VALUES (?,?,?,?,?,?,'bounce',?,?,?)
+                              (from_code,to_code,pair_code,item_key,item_name,amount,status,blob_b64,created,nested_keys,batch_id,parent_id)
+                            VALUES (?,?,?,?,?,?,'bounce',?,?,?,?,?)
                             """)) {
                         for (ItemNbt.PackedChild child : rejected) {
                             ps.setString(1, source.fromCode());
@@ -1157,6 +1175,8 @@ public final class Store {
                             ps.setString(7, java.util.Base64.getEncoder().encodeToString(child.blob()));
                             ps.setLong(8, System.currentTimeMillis());
                             ps.setString(9, child.nestedKeys());
+                            ps.setNull(10, java.sql.Types.VARCHAR);
+                            ps.setLong(11, source.id());
                             ps.addBatch();
                         }
                         ps.executeBatch();
