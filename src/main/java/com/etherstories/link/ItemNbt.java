@@ -177,9 +177,23 @@ public final class ItemNbt {
                 err.append("[nms=null]");
                 return null;
             }
+            Object regs = registryAccess();
+            // 带模组数据组件的物品优先走 NBT/codec：STREAM_CODEC 在部分混合端
+            // 上可能不带模组组件，导致 create:package_contents 之类内容被静默丢弃。
+            if (DataComponents.modded(item)) {
+                Object tag = saveTag(nms, regs, err);
+                if (tag == null) tag = saveCodecTag(nms, regs, err);
+                if (tag != null) {
+                    byte[] raw = writeTag(tag);
+                    if (raw != null && raw.length > 0) return prefix(MAGIC1, raw);
+                    err.append("[writeTag]");
+                }
+                byte[] stream = saveStream(nms, err);
+                if (stream != null && stream.length > 0) return prefix(MAGIC2, stream);
+                return null;
+            }
             byte[] stream = saveStream(nms, err);
             if (stream != null && stream.length > 0) return prefix(MAGIC2, stream);
-            Object regs = registryAccess();
             Object tag = saveTag(nms, regs, err);
             if (tag == null) tag = saveCodecTag(nms, regs, err);
             if (tag == null) return null;

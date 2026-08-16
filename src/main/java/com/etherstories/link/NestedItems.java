@@ -493,7 +493,8 @@ public final class NestedItems {
             try {
                 for (String cls : new String[]{
                         "org.bukkit.craftbukkit.util.CraftChatMessage",
-                        "org.bukkit.craftbukkit.v1_21_R1.util.CraftChatMessage"
+                        "org.bukkit.craftbukkit.v1_21_R1.util.CraftChatMessage",
+                        "org.bukkit.craftbukkit.v.util.CraftChatMessage"
                 }) {
                     try {
                         Object s = Reflect.method(Class.forName(cls), "fromComponent", name.getClass()).invoke(null, name);

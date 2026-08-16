@@ -533,7 +533,8 @@ public final class ItemKeys {
         for (String n : new String[]{
                 "org.bukkit.craftbukkit.inventory.CraftItemStack",
                 "org.bukkit.craftbukkit.v1_21_R1.inventory.CraftItemStack",
-                "org.bukkit.craftbukkit.v1_21_R2.inventory.CraftItemStack"
+                "org.bukkit.craftbukkit.v1_21_R2.inventory.CraftItemStack",
+                "org.bukkit.craftbukkit.v.inventory.CraftItemStack"
         }) {
             try {
                 return Class.forName(n);

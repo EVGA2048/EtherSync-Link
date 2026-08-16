@@ -28,7 +28,7 @@ public final class DataComponents {
         Object nms = nms(item);
         if (nms == null) return null;
         for (Object[] e : entries(nms)) {
-            if (id.equalsIgnoreCase(String.valueOf(e[0]))) return e[1];
+            if (id.equalsIgnoreCase(nameOf(e[0]))) return e[1];
         }
         Object type = type(id);
         return type == null ? null : get(nms, type);
@@ -43,7 +43,7 @@ public final class DataComponents {
         Object nms = nms(item);
         if (nms == null) return false;
         for (Object[] e : entries(nms)) {
-            String id = String.valueOf(e[0]);
+            String id = nameOf(e[0]);
             if (!id.isEmpty() && !id.startsWith("minecraft:")) return true;
         }
         return false;
@@ -76,7 +76,7 @@ public final class DataComponents {
         List<String> out = new ArrayList<>();
         Object nms = nms(item);
         if (nms == null) return out;
-        for (Object[] e : entries(nms)) out.add(String.valueOf(e[0]));
+        for (Object[] e : entries(nms)) out.add(nameOf(e[0]));
         return out;
     }
 
@@ -112,7 +112,7 @@ public final class DataComponents {
                 if (reg instanceof Iterable<?> it) {
                     for (Object type : it) {
                         if (type == null) continue;
-                        String name = String.valueOf(type);
+                        String name = nameOf(type);
                         if (name.indexOf(':') > 0) built.putIfAbsent(name.toLowerCase(Locale.ROOT), type);
                     }
                 }
@@ -121,6 +121,36 @@ public final class DataComponents {
             typeIndex = Map.copyOf(built);
             return typeIndex;
         }
+    }
+
+    /** DataComponentType 的注册名：注册表反查 getKey，避免依赖不可靠的 toString。 */
+    private static String nameOf(Object type) {
+        if (type == null) return "";
+        try {
+            Object reg = Class.forName("net.minecraft.core.registries.BuiltInRegistries")
+                    .getField("DATA_COMPONENT_TYPE").get(null);
+            Object rl = invoke(reg, "getKey", type);
+            if (rl != null) {
+                String s = String.valueOf(rl);
+                if (s.indexOf(':') > 0) return s;
+            }
+        } catch (Throwable ignored) {
+        }
+        for (String cls : new String[]{
+                "net.neoforged.neoforge.registries.ForgeRegistries",
+                "net.minecraftforge.registries.ForgeRegistries"
+        }) {
+            try {
+                Object reg = Class.forName(cls).getField("DATA_COMPONENT_TYPES").get(null);
+                Object rl = invoke(reg, "getKey", type);
+                if (rl != null) {
+                    String s = String.valueOf(rl);
+                    if (s.indexOf(':') > 0) return s;
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+        return String.valueOf(type);
     }
 
     private static Object lookup(String id) {
