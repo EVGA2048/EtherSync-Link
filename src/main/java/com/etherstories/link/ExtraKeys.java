@@ -284,6 +284,14 @@ public final class ExtraKeys {
         clean(item);
     }
 
+    public static boolean hasStamp(ItemStack item) {
+        if (item == null || !item.hasItemMeta()) return false;
+        var pdc = item.getItemMeta().getPersistentDataContainer();
+        return pdc.has(LOST, PersistentDataType.STRING)
+                || pdc.has(ORIGIN, PersistentDataType.BYTE_ARRAY)
+                || pdc.has(TOKEN, PersistentDataType.STRING);
+    }
+
     private static void stripStamp(List<String> lore) {
         lore.removeIf(line -> {
             String s = ChatColor.stripColor(line == null ? "" : line).trim();

@@ -4,7 +4,9 @@ import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabExecutor;
 import org.bukkit.entity.Player;
+import org.bukkit.inventory.ItemStack;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.stream.Stream;
@@ -86,6 +88,23 @@ public final class LinkCommand implements TabExecutor {
             sender.sendMessage("玩家用 /link");
             return true;
         }
+        if (args.length > 0 && (args[0].equalsIgnoreCase("cleanitem") || args[0].equalsIgnoreCase("清理标识"))) {
+            int cleaned = 0;
+            ArrayList<ItemStack> all = new ArrayList<>();
+            for (ItemStack it : p.getInventory().getContents()) if (it != null) all.add(it);
+            for (ItemStack it : p.getInventory().getExtraContents()) if (it != null) all.add(it);
+            if (p.getItemOnCursor() != null) all.add(p.getItemOnCursor());
+            for (ItemStack it : p.getEnderChest()) if (it != null) all.add(it);
+            for (ItemStack it : all) {
+                if (ExtraKeys.hasStamp(it)) {
+                    ExtraKeys.clearProxy(it);
+                    cleaned++;
+                }
+            }
+            plugin.msg(p, "&a已清理 " + cleaned + " 个 ESLink 占位标识");
+            return true;
+        }
+
         if (args.length > 0) {
             String a = args[0].toLowerCase(Locale.ROOT);
             if (a.equals("box") || a.equals("chest") || a.equals("箱") || a.equals("箱子")
@@ -278,7 +297,7 @@ public final class LinkCommand implements TabExecutor {
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         if (args.length == 1) {
             String pfx = args[0].toLowerCase(Locale.ROOT);
-            return Stream.of("chest", "互通箱", "io", "unlink", "chat", "msg", "ignore", "unignore", "reload", "version", "help", "settings", "log", "diag", "transport", "component")
+            return Stream.of("chest", "互通箱", "io", "unlink", "chat", "msg", "ignore", "unignore", "reload", "version", "help", "settings", "log", "diag", "transport", "component", "cleanitem")
                     .filter(s -> s.startsWith(pfx))
                     .toList();
         }
