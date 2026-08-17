@@ -214,6 +214,15 @@ public final class Store {
                       INDEX idx_alert_id (id)
                     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                     """);
+            s.executeUpdate("""
+                    CREATE TABLE IF NOT EXISTS link_io_events (
+                      id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                      pair_code VARCHAR(32) NOT NULL,
+                      level TINYINT NOT NULL,
+                      event_time_ms BIGINT NOT NULL,
+                      INDEX idx_pair_time (pair_code, id)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                    """);
         }
     }
 
@@ -1417,5 +1426,52 @@ public final class Store {
             }
         }
         return out;
+    }
+
+    public void insertIoEvent(String pairCode, int level, long timeMs) throws Exception {
+        if (pairCode == null || pairCode.isBlank()) return;
+        try (Connection c = ds.getConnection();
+             PreparedStatement ps = c.prepareStatement(
+                     "INSERT INTO link_io_events (pair_code, level, event_time_ms) VALUES (?, ?, ?)")) {
+            ps.setString(1, pairCode);
+            ps.setInt(2, Math.max(0, Math.min(15, level)));
+            ps.setLong(3, timeMs);
+            ps.executeUpdate();
+        }
+    }
+
+    public long maxIoEventId(String pairCode) throws Exception {
+        if (pairCode == null || pairCode.isBlank()) return 0;
+        try (Connection c = ds.getConnection();
+             PreparedStatement ps = c.prepareStatement(
+                     "SELECT COALESCE(MAX(id), 0) FROM link_io_events WHERE pair_code=?")) {
+            ps.setString(1, pairCode);
+            ResultSet rs = ps.executeQuery();
+            return rs.next() ? rs.getLong(1) : 0;
+        }
+    }
+
+    public List<Models.IoEvent> ioEventsAfter(String pairCode, long afterId) throws Exception {
+        List<Models.IoEvent> out = new ArrayList<>();
+        if (pairCode == null || pairCode.isBlank()) return out;
+        try (Connection c = ds.getConnection();
+             PreparedStatement ps = c.prepareStatement(
+                     "SELECT id, level, event_time_ms FROM link_io_events WHERE pair_code=? AND id>? ORDER BY id ASC")) {
+            ps.setString(1, pairCode);
+            ps.setLong(2, afterId);
+            ResultSet rs = ps.executeQuery();
+            while (rs.next()) {
+                out.add(new Models.IoEvent(rs.getLong("id"), rs.getInt("level"), rs.getLong("event_time_ms")));
+            }
+        }
+        return out;
+    }
+
+    public void pruneIoEvents(long olderThanMs) throws Exception {
+        try (Connection c = ds.getConnection();
+             PreparedStatement ps = c.prepareStatement("DELETE FROM link_io_events WHERE event_time_ms<?")) {
+            ps.setLong(1, System.currentTimeMillis() - olderThanMs);
+            ps.executeUpdate();
+        }
     }
 }
