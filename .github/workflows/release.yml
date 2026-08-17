@@ -1,0 +1,30 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      - run: mvn -B -DskipTests package
+      - name: Publish GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VER="${GITHUB_REF_NAME#v}"
+          gh release create "$GITHUB_REF_NAME" \
+            "target/ESLink-${VER}.jar" \
+            --title "ESLink ${VER}" \
+            --notes "默认启用事件时间戳红石同步：电平变化写入 link_io_events，接收端按原间隔回放。状态轮询版备份为 IoNet.java.state_version（不编译）。TX 红石灯 / RX 标靶不变。各服都换这个 jar 后重启。"
