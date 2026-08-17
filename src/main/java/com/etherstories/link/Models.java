@@ -53,4 +53,6 @@ public final class Models {
 
     public record ChatRow(long id, String fromCode, String fromName, UUID playerUuid, String playerName, String message,
                           String itemKey, String itemName, int itemAmount, byte[] itemBlob) {}
+
+    public record IoEvent(long id, int level, long timeMs) {}
 }
