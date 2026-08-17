@@ -26,7 +26,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * 
  * 切换说明：
  * 1. 将现有的 IoNet.java 重命名为 IoNet.java.state_version (备份)
- * 2. 将本文件重命名为 IoNet.java 即可直接启用，无需修改任何代码。
+ * 2. 将本文件重命名为 IoNet.java
  */
 public final class IoNet {
     private static final Material RX_BODY = Material.TARGET;
@@ -58,7 +58,6 @@ public final class IoNet {
     }
 
     public IoNet(ESLinkPlugin plugin) { this.plugin = plugin; }
-
     /** 每 tick 运行，驱动红石逻辑与事件回放 */
     public void pulse() {
         if (!plugin.store().ready() || local.isEmpty()) return;
@@ -81,10 +80,9 @@ public final class IoNet {
                     continue;
                 }
 
-                // 驱动事件播放器
                 ReplaySession s = replaySessions.computeIfAbsent(n.id(), id -> new ReplaySession());
                 
-                // 1. 如果没有激活播放，且队列里有新事件，初始化播放器
+                // 1. 如果没有激活播放，且队列里有新事件，则初始化
                 if (!s.active && !s.queue.isEmpty()) {
                     Models.IoEvent first = s.queue.poll();
                     applyRx(n, b, NodeSigns.mapLogic(n.logic(), true, first.level()));
@@ -93,13 +91,13 @@ public final class IoNet {
                     s.active = true;
                 }
 
-                // 2. 依次按相对时间间隔（Delta）播放后续事件
+                // 2. 依次按相对时间间隔播放后续事件
                 while (s.active && !s.queue.isEmpty()) {
                     Models.IoEvent next = s.queue.peek();
                     long eventDelta = next.timeMs() - s.lastEventTimeMs;
                     long playbackElapsed = now - s.lastPlayedTimeMs;
 
-                    // 安全防御：如果队列由于服务器卡顿积压超过 50 个事件，进行快进，丢弃历史并以最新状态重置
+                    // 安全对策：如果队列由于服务器卡顿积压超过 50 个事件，进行快进，丢弃历史并以最新状态重置
                     if (s.queue.size() > 50) {
                         s.queue.clear();
                         applyRx(n, b, NodeSigns.mapLogic(n.logic(), true, next.level()));
@@ -152,7 +150,6 @@ public final class IoNet {
                             }
                             if ("RX".equals(n.role())) {
                                 rxKeys.add(ESLinkPlugin.locKey(n.world(), n.x(), n.y(), n.z()));
-                                
                                 Block body = block(n);
                                 if (body != null && loaded(body)) {
                                     ensureBody(n, body);
@@ -219,23 +216,18 @@ public final class IoNet {
     public boolean isTx(String world, int x, int y, int z) {
         return txKeys.contains(ESLinkPlugin.locKey(world, x, y, z));
     }
-
     public boolean isRxNode(Block b) {
         return b != null && isRxAt(b.getWorld().getName(), b.getX(), b.getY(), b.getZ());
     }
-
     public boolean isRxAt(String world, int x, int y, int z) {
         return rxKeys.contains(ESLinkPlugin.locKey(world, x, y, z));
     }
-
     public boolean hasRxNodes() {
         return !rxKeys.isEmpty();
     }
-
     public boolean hasTxNodes() {
         return !txKeys.isEmpty();
     }
-
     public int heldAt(Block node) {
         if (node == null || !isRxNode(node)) return -1;
         for (Models.IoRow n : local.values()) {
@@ -676,7 +668,6 @@ public final class IoNet {
         writeSignal(node, 0);
         notifyPower(node, 0);
     }
-
     private static boolean loaded(Block b) {
         return b.getWorld().isChunkLoaded(b.getX() >> 4, b.getZ() >> 4);
     }
@@ -684,14 +675,12 @@ public final class IoNet {
     private static int clamp(int v) {
         return Math.max(0, Math.min(15, v));
     }
-
     private String otherServer(String pair) {
         String self = plugin.serverCode();
         String[] p = pair.split("-");
         if (p.length < 2) return "?";
         return p[0].equalsIgnoreCase(self) ? p[1] : p[0];
     }
-
     private Block block(Models.IoRow n) {
         return blockCache.computeIfAbsent(n.id(), id -> {
             World w = Bukkit.getWorld(n.world());
