@@ -63,6 +63,9 @@ public final class ItemCodec {
         if (NestedItems.emptiedContainer(st, itemKey, nestedKeys)) st = null;
         if (!ItemKeys.real(st)) {
             if (NestedItems.containerLike(itemKey)) return null;
+            // 富快照解码失败时不要造一个空物品冒充成功，直接退回发送端。
+            if ((ItemNbt.ours(blob) && ItemNbt.rich(blob))
+                    || (ItemEnvelope.ours(blob) && ItemEnvelope.rich(blob))) return null;
             st = ItemKeys.create(itemKey, amount);
         }
         if (!ItemKeys.real(st)) {

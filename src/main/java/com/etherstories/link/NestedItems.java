@@ -31,8 +31,13 @@ public final class NestedItems {
     private static final Set<String> SKIP_NS = Set.of(
             "http", "https", "www", "text", "extra", "color", "bold", "italic",
             "click", "hover", "nbt", "type", "slot", "count", "tag", "name", "id");
+    private static volatile String lastFillError = "";
 
     private NestedItems() {}
+
+    public static String lastFillError() {
+        return lastFillError;
+    }
 
     public static String csv(ItemStack item) {
         LinkedHashSet<String> keys = new LinkedHashSet<>();
@@ -242,10 +247,19 @@ public final class NestedItems {
     }
 
     static ItemStack applyComponent(ItemStack box, String componentId, List<ItemStack> inners) {
+        lastFillError = "";
         try {
             Object contents = makeContainer(inners);
-            return contents == null ? null : DataComponents.write(box, componentId, contents);
+            if (contents == null) {
+                lastFillError = "makeContainer=null " + componentId;
+                return null;
+            }
+            ItemStack out = DataComponents.write(box, componentId, contents);
+            if (out == null && lastFillError.isEmpty()) lastFillError = DataComponents.lastWriteError();
+            return out;
         } catch (Throwable t) {
+            lastFillError = "异常 " + t.getClass().getSimpleName()
+                    + (t.getMessage() == null ? "" : ": " + t.getMessage());
             return null;
         }
     }
@@ -256,6 +270,10 @@ public final class NestedItems {
             if (!ItemKeys.real(it)) continue;
             Object s = ItemKeys.nmsOf(it);
             if (s != null) nms.add(s);
+        }
+        if (nms.isEmpty()) {
+            lastFillError = "makeContainer 没有可用的 NMS 物品";
+            return null;
         }
         Class<?> icc = Class.forName("net.minecraft.world.item.component.ItemContainerContents");
         for (String name : new String[]{"fromItems", "of"}) {
@@ -273,6 +291,7 @@ public final class NestedItems {
             } catch (Throwable ignored) {
             }
         }
+        lastFillError = "makeContainer 反射失败";
         return null;
     }
 
@@ -480,8 +499,35 @@ public final class NestedItems {
     private static void addType(String raw, Set<String> out) {
         if (raw == null || raw.isBlank()) return;
         String s = raw.trim().toLowerCase(Locale.ROOT);
-        if (!s.contains(":")) s = "minecraft:" + s;
-        if (ItemKeys.usable(s)) out.add(s);
+        int i = s.indexOf(':');
+        if (i >= 0) {
+            String ns = s.substring(0, i);
+            String path = s.substring(i + 1);
+            if (SKIP_NS.contains(ns)) return;
+            if (path.isBlank()) return;
+            if (ns.equals("minecraft")) {
+                // Youer 会给模组物品动态注册 Bukkit Material（名称如 CREATE_WRENCH），
+                // matchMaterial("create_wrench") 会命中它，但它的真实 key 是 create:wrench。
+                // 这里必须用 Material 自己的 key，不能再拼 minecraft:create_wrench。
+                org.bukkit.Material mat = org.bukkit.Material.matchMaterial(path);
+                if (mat == null || mat.isAir()) return;
+                addMaterialKey(mat, out);
+            } else if (ItemKeys.usable(s)) {
+                out.add(s);
+            }
+            return;
+        }
+        // 没有命名空间：同样只认 Material 自己的 key，不硬拼 minecraft 前缀。
+        org.bukkit.Material mat = org.bukkit.Material.matchMaterial(s);
+        if (mat != null && !mat.isAir()) addMaterialKey(mat, out);
+    }
+
+    private static void addMaterialKey(org.bukkit.Material mat, Set<String> out) {
+        try {
+            String key = mat.getKey().toString().toLowerCase(Locale.ROOT);
+            if (ItemKeys.usable(key)) out.add(key);
+        } catch (Throwable ignored) {
+        }
     }
 
     static String legacyCustomName(Object nms) {
@@ -493,7 +539,8 @@ public final class NestedItems {
             try {
                 for (String cls : new String[]{
                         "org.bukkit.craftbukkit.util.CraftChatMessage",
-                        "org.bukkit.craftbukkit.v1_21_R1.util.CraftChatMessage"
+                        "org.bukkit.craftbukkit.v1_21_R1.util.CraftChatMessage",
+                        "org.bukkit.craftbukkit.v.util.CraftChatMessage"
                 }) {
                     try {
                         Object s = Reflect.method(Class.forName(cls), "fromComponent", name.getClass()).invoke(null, name);

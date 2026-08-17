@@ -36,6 +36,29 @@ public final class ItemNbt {
     private static final byte[] MAGIC6 = {'E', 'S', 'N', '6'};
     private static final Set<String> PACK_LOG = ConcurrentHashMap.newKeySet();
     private static final ThreadLocal<Integer> DEPTH = ThreadLocal.withInitial(() -> 0);
+    private static final java.util.Map<String, Long> FORMAT_COUNTS = new java.util.concurrent.ConcurrentHashMap<>();
+    private static volatile String lastSnapshotError = "";
+    private static volatile String lastLoadError = "";
+    private static volatile String lastParseError = "";
+
+    private static void count(String fmt) {
+        FORMAT_COUNTS.merge(fmt, 1L, Long::sum);
+    }
+
+    /** 供 /link diag 展示的诊断行。 */
+    public static List<String> diagLines() {
+        List<String> out = new ArrayList<>();
+        StringBuilder sb = new StringBuilder("快照格式");
+        List<String> keys = new ArrayList<>(FORMAT_COUNTS.keySet());
+        java.util.Collections.sort(keys);
+        for (String k : keys) sb.append(' ').append(k).append('=').append(FORMAT_COUNTS.get(k));
+        out.add(sb.toString());
+        if (lastSnapshotError != null && !lastSnapshotError.isBlank())
+            out.add("最近快照失败 " + lastSnapshotError);
+        if (lastLoadError != null && !lastLoadError.isBlank())
+            out.add("最近还原失败 " + lastLoadError);
+        return out;
+    }
 
     private ItemNbt() {}
 
@@ -65,6 +88,7 @@ public final class ItemNbt {
             if (PACK_LOG.add("keyonly:" + key))
                 warn("整包快照失败，只能发注册名，物品数据会丢: " + key + " · " + err
                         + " · " + NestedItems.componentSummary(item));
+            lastSnapshotError = key + " · " + err;
             return saveKeyOnly(item);
         } catch (Throwable t) {
             return null;
@@ -86,14 +110,33 @@ public final class ItemNbt {
             }
             if (has(blob, MAGIC1)) {
                 Object tag = readTag(payload(blob, MAGIC1));
-                if (tag == null) return null;
-                Object nms = parseStack(tag, registryAccess());
-                return nms == null ? null : namedFromNms(nms);
+                if (tag == null) {
+                    loadError("ESN1 readTag 失败");
+                    return null;
+                }
+                Object regs = registryAccess();
+                Object nms = parseStack(tag, regs);
+                if (nms == null) {
+                    loadError("ESN1 parseStack 失败 regs="
+                            + (regs == null ? "null" : regs.getClass().getName())
+                            + " tag=" + tag.getClass().getName() + " · " + lastParseError);
+                    return null;
+                }
+                ItemStack st = namedFromNms(nms);
+                if (st == null) loadError("ESN1 namedFromNms 失败 nms=" + nms.getClass().getName());
+                return st;
             }
             if (has(blob, MAGIC0)) return loadKeyOnly(payload(blob, MAGIC0));
-        } catch (Throwable ignored) {
+        } catch (Throwable t) {
+            loadError("load 异常 " + t.getClass().getSimpleName()
+                    + (t.getMessage() == null ? "" : ": " + t.getMessage()));
         }
         return null;
+    }
+
+    private static void loadError(String msg) {
+        lastLoadError = msg;
+        if (PACK_LOG.add("load:" + msg)) warn("快照还原失败 " + msg);
     }
 
     public static boolean ours(byte[] blob) {
@@ -177,9 +220,34 @@ public final class ItemNbt {
                 err.append("[nms=null]");
                 return null;
             }
-            byte[] stream = saveStream(nms, err);
-            if (stream != null && stream.length > 0) return prefix(MAGIC2, stream);
             Object regs = registryAccess();
+            String itemId = ItemKeys.id(item);
+            boolean nonVanilla = ItemKeys.usable(itemId) && !itemId.startsWith("minecraft:");
+            // 带模组数据组件的物品、以及所有非原版物品，都优先走 NBT/codec。
+            // STREAM_CODEC 在混合端上可能用注册表数字 ID，跨服 ID 布局不同会解错或解不出。
+            if (DataComponents.modded(item) || nonVanilla) {
+                Object tag = saveTag(nms, regs, err);
+                if (tag == null) tag = saveCodecTag(nms, regs, err);
+                if (tag != null) {
+                    byte[] raw = writeTag(tag);
+                    if (raw != null && raw.length > 0) {
+                        count("ESN1-m");
+                        return prefix(MAGIC1, raw);
+                    }
+                    err.append("[writeTag]");
+                }
+                byte[] stream = saveStream(nms, err);
+                if (stream != null && stream.length > 0) {
+                    count("ESN2-m");
+                    return prefix(MAGIC2, stream);
+                }
+                return null;
+            }
+            byte[] stream = saveStream(nms, err);
+            if (stream != null && stream.length > 0) {
+                count("ESN2");
+                return prefix(MAGIC2, stream);
+            }
             Object tag = saveTag(nms, regs, err);
             if (tag == null) tag = saveCodecTag(nms, regs, err);
             if (tag == null) return null;
@@ -188,6 +256,7 @@ public final class ItemNbt {
                 err.append("[writeTag]");
                 return null;
             }
+            count("ESN1");
             return prefix(MAGIC1, raw);
         } catch (Throwable t) {
             err.append("[saveNms ").append(t.getClass().getSimpleName()).append(']');
@@ -226,6 +295,7 @@ public final class ItemNbt {
                 out.write(child);
             }
             out.flush();
+            count("ESN6");
             return prefix(MAGIC6, raw.toByteArray());
         } catch (Throwable t) {
             return null;
@@ -340,6 +410,7 @@ public final class ItemNbt {
             out.writeInt(Math.max(1, item.getAmount()));
             out.writeUTF(nz(plainName(item)));
             out.flush();
+            count("ESN0");
             return prefix(MAGIC0, raw.toByteArray());
         } catch (Throwable t) {
             return null;
@@ -440,7 +511,7 @@ public final class ItemNbt {
     private static volatile Object registryAccessCache;
 
     /** 每件物品都要用，别每次重新 Class.forName 一遍服务端。 */
-    private static Object registryAccess() {
+    static Object registryAccess() {
         Object cached = registryAccessCache;
         if (cached != null) return cached;
         Object found = findRegistryAccess();
@@ -755,6 +826,33 @@ public final class ItemNbt {
 
     private static Object parseStack(Object tag, Object regs) throws Exception {
         Class<?> stack = Class.forName("net.minecraft.world.item.ItemStack");
+        lastParseError = "";
+        // 先按精确签名走 getMethod，避免 Reflect.methods 在混合端扫方法表失败。
+        Class<?> provider = Class.forName("net.minecraft.core.HolderLookup$Provider");
+        Class<?> compound = Class.forName("net.minecraft.nbt.CompoundTag");
+        Class<?> tagCls = Class.forName("net.minecraft.nbt.Tag");
+        if (regs != null && provider.isInstance(regs)) {
+            if (compound.isInstance(tag)) {
+                try {
+                    Object r = Reflect.method(stack, "parseOptional", provider, compound).invoke(null, regs, tag);
+                    if (r != null) return r;
+                } catch (Throwable t) {
+                    lastParseError = "parseOptional " + shortMsg(t);
+                }
+            }
+            if (tagCls.isInstance(tag)) {
+                try {
+                    Object r = Reflect.method(stack, "parse", provider, tagCls).invoke(null, regs, tag);
+                    if (r instanceof Optional<?> o) r = o.orElse(null);
+                    if (r != null) return r;
+                } catch (Throwable t) {
+                    lastParseError = "parse " + shortMsg(t);
+                }
+            }
+        } else {
+            lastParseError = "regs 不是 HolderLookup.Provider: "
+                    + (regs == null ? "null" : regs.getClass().getName());
+        }
         for (String name : new String[]{"parseOptional", "parse", "of"}) {
             for (Method m : Reflect.methods(stack)) {
                 if (!m.getName().equals(name)) continue;
@@ -799,19 +897,17 @@ public final class ItemNbt {
 
     private static Object readTag(byte[] raw) throws Exception {
         Class<?> nbtIo = Class.forName("net.minecraft.nbt.NbtIo");
-        ByteArrayInputStream in = new ByteArrayInputStream(raw);
+        Class<?> acc = Class.forName("net.minecraft.nbt.NbtAccounter");
+        Object unlimited = Reflect.method(acc, "unlimitedHeap").invoke(null);
+        // ESN1 是 gzip 压缩 NBT；必须走 readCompressed(InputStream, NbtAccounter)。
+        // 之前的第二回退把 Class 对象当参数类型传错了，第三回退 read(DataInput) 只能读未压缩数据。
         try {
-            return Reflect.method(nbtIo, "readCompressed", InputStream.class).invoke(null, in);
+            return Reflect.method(nbtIo, "readCompressed", InputStream.class, acc)
+                    .invoke(null, new ByteArrayInputStream(raw), unlimited);
         } catch (Throwable ignored) {
         }
-        in.reset();
-        try {
-            Class<?> acc = Class.forName("net.minecraft.nbt.NbtAccounter");
-            Object unlimited = Reflect.method(acc, "unlimitedHeap").invoke(null);
-            return Reflect.method(nbtIo, "readCompressed", InputStream.class, acc).invoke(null, in, unlimited);
-        } catch (Throwable ignored) {
-        }
-        in.reset();
-        return Reflect.method(nbtIo, "read", java.io.DataInput.class).invoke(null, new java.io.DataInputStream(in));
+        // 未压缩 NBT 回退。
+        return Reflect.method(nbtIo, "read", java.io.DataInput.class)
+                .invoke(null, new java.io.DataInputStream(new ByteArrayInputStream(raw)));
     }
 }

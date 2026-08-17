@@ -2,7 +2,7 @@
 # 新版本会自动补缺失的键，不会改你已经填过的值。
 # /link 大厅    /link chest    /link io    /link settings
 
-config-version: 13
+config-version: 14
 config:
   auto-fill-missing: true
 
@@ -36,7 +36,9 @@ sound-cooldown-ticks: 40
 chest:
   stacks-per-scan: 4
   queue-limit: 16
-  # 纸箱/潜影盒先倒计时再发（铁锭等小件照常走）。0=关掉。东西越多越接近 max。
+  # 所有物品发货倒计时（秒），到点整批发出。0=关闭，立即发。
+  batch-delay-seconds: 3
+  # 纸箱/潜影盒在基础倒计时上再叠加的额外延迟。0=关掉。东西越多越接近 max。
   heavy-delay-seconds: 3
   heavy-max-seconds: 8
   # 对面没有的模组附魔/属性：deliver=照样给（lore 写丢了什么，带回原服可恢复）；refuse=当缺物品
@@ -44,6 +46,14 @@ chest:
   # 潜影盒 / 包裹等带内含的容器。auto=启动自检通过才收发（推荐）；on=强开；off=永不收发
   # 自检结果看 /link diag
   containers: auto
+
+# 全局传输急停。/link transport off 可随时停止一切 chest 收发（游戏内，立即生效）。
+transport:
+  enabled: true
+
+# 禁用的数据组件 ID（应急隔离问题组件，命中即拦截收发并退回）。
+# 例：create:package_contents、create:clipboard_content
+blocked-components: []
 
 # 红石：本地每 tick 套用 0–15。跨服只在等级变化或心跳时写库。
 # 对端掉线 / 超过 stale-ms 没心跳 / 区块没加载 → 输出固定 0。

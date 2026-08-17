@@ -4,7 +4,7 @@ Paper / Bukkit 跨服互通插件，面向 **EtherStories（ES2）** 与姊妹�
 
 ## 起因
 
-ES2 即 EtherStories。两台服务器模组大体相近，却不完全一致；不少玩家会在两边来回搭建机械动力产线。  
+ES2 即 EtherStories。两台服务器模组大体相近，却不完全一致；不少玩家会在两边来回搭建机械动力产线。
 与其让产线、物资、协作被服际边界切断，不如用插件把两服玩家联动起来——物品、红石、聊天与交易都能跨服对接，生产线也能「跨服接轨」。
 
 ## 能做什么
@@ -55,10 +55,27 @@ ES2 即 EtherStories。两台服务器模组大体相近，却不完全一致；
 | `/link chat` | 聊天相关 |
 | `/link msg <玩家> <内容>` | 私聊 |
 | `/link help` | 说明书 |
-| `/link diag` | 诊断 |
+| `/link diag` | 容器/组件/快照诊断 |
+| `/link diag retry` | 重跑容器自检 |
+| `/link diag io` | 红石诊断 |
+| `/link transport on\|off` | 全局运输急停 |
+| `/link component block\|unblock\|list <id>` | 禁用/恢复数据组件 |
+| `/link cleanitem` | 清除背包/末影箱里的 ESLink 占位标识 |
+| `/link log clear` | 清空日志 |
 | `/link reload` | 重载配置并重连 MySQL |
 
 权限：`eslink.use`、`eslink.chest`（默认开放），`eslink.admin` / `eslink.super`（默认 OP）。
+管理指令（`reload`、`transport`、`component`、`diag retry`）需 `eslink.admin`。
+
+## 物品跨服说明
+
+- 原版物品按 Bukkit/Paper 数据完整传输。
+- 模组物品以 namespaced key 为准，两端需安装相同模组。
+- 所有非原版物品优先使用 NBT 序列化，避免 `STREAM_CODEC` 注册表数字 ID 在不同服间错位。
+- Create 纸箱、潜影盒等容器按内含拆包传输；对端缺失的子物品会单独退回，其余照常送达。
+- 每批物品带 SHA-256 行级/批次级校验；校验失败会整批 quarantine，不会投递给玩家。
+- 对端缺失附魔/属性时，默认 `deliver`：物品送达并打标记，带回原服可恢复；`chest.unknown-extra: refuse` 则直接退回。
+- 旧版占位标识可用 `/link cleanitem` 清除。
 
 ## 构建
 

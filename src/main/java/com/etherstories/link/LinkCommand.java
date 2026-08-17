@@ -4,7 +4,9 @@ import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabExecutor;
 import org.bukkit.entity.Player;
+import org.bukkit.inventory.ItemStack;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.stream.Stream;
@@ -32,10 +34,77 @@ public final class LinkCommand implements TabExecutor {
                             + " &8" + plugin.serverName()));
             return true;
         }
+        if (args.length > 0 && args[0].equalsIgnoreCase("transport")) {
+            if (!sender.hasPermission("eslink.admin") && !sender.hasPermission("eslink.super")) {
+                sender.sendMessage(ColorUtil.colorize("&c没有权限"));
+                return true;
+            }
+            boolean on;
+            if (args.length >= 2 && (args[1].equalsIgnoreCase("off") || args[1].equalsIgnoreCase("stop"))) {
+                on = false;
+            } else if (args.length >= 2 && (args[1].equalsIgnoreCase("on") || args[1].equalsIgnoreCase("start"))) {
+                on = true;
+            } else {
+                sender.sendMessage(ColorUtil.colorize("&bESLink &7» &f当前传输 "
+                        + (plugin.transportEnabled() ? "&a开启" : "&c已急停")
+                        + "&f。用法: /link transport on|off"));
+                return true;
+            }
+            plugin.setTransportEnabled(on);
+            String msg = on ? "&a传输已开启" : "&c传输已急停（停止一切 chest 收发，退回回收仍照常）";
+            plugin.notifyAdmins(msg);
+            sender.sendMessage(ColorUtil.colorize("&bESLink &7» &f" + msg));
+            return true;
+        }
+        if (args.length > 0 && args[0].equalsIgnoreCase("component")) {
+            if (!sender.hasPermission("eslink.admin") && !sender.hasPermission("eslink.super")) {
+                sender.sendMessage(ColorUtil.colorize("&c没有权限"));
+                return true;
+            }
+            if (args.length >= 3 && (args[1].equalsIgnoreCase("block") || args[1].equalsIgnoreCase("ban"))) {
+                String id = args[2];
+                plugin.blockComponent(id);
+                plugin.notifyAdmins("&c已禁用组件 " + id + "，相关收发将被拦截退回");
+                sender.sendMessage(ColorUtil.colorize("&bESLink &7» &f已禁用组件 &c" + id));
+                return true;
+            }
+            if (args.length >= 3 && args[1].equalsIgnoreCase("unblock")) {
+                String id = args[2];
+                plugin.unblockComponent(id);
+                plugin.notifyAdmins("&a已解除禁用组件 " + id);
+                sender.sendMessage(ColorUtil.colorize("&bESLink &7» &f已解除禁用组件 &a" + id));
+                return true;
+            }
+            java.util.Set<String> ids = plugin.blockedComponentIds();
+            if (ids.isEmpty()) {
+                sender.sendMessage(ColorUtil.colorize("&bESLink &7» &f当前没有禁用的组件"));
+            } else {
+                sender.sendMessage(ColorUtil.colorize("&bESLink &7» &f已禁用组件: &c" + String.join("&f, &c", ids)));
+            }
+            sender.sendMessage(ColorUtil.colorize("&8用法: /link component block|unblock <id>"));
+            return true;
+        }
         if (!(sender instanceof Player p)) {
             sender.sendMessage("玩家用 /link");
             return true;
         }
+        if (args.length > 0 && (args[0].equalsIgnoreCase("cleanitem") || args[0].equalsIgnoreCase("清理标识"))) {
+            int cleaned = 0;
+            ArrayList<ItemStack> all = new ArrayList<>();
+            for (ItemStack it : p.getInventory().getContents()) if (it != null) all.add(it);
+            for (ItemStack it : p.getInventory().getExtraContents()) if (it != null) all.add(it);
+            if (p.getItemOnCursor() != null) all.add(p.getItemOnCursor());
+            for (ItemStack it : p.getEnderChest()) if (it != null) all.add(it);
+            for (ItemStack it : all) {
+                if (ExtraKeys.hasStamp(it)) {
+                    ExtraKeys.clearProxy(it);
+                    cleaned++;
+                }
+            }
+            plugin.msg(p, "&a已清理 " + cleaned + " 个 ESLink 占位标识");
+            return true;
+        }
+
         if (args.length > 0) {
             String a = args[0].toLowerCase(Locale.ROOT);
             if (a.equals("box") || a.equals("chest") || a.equals("箱") || a.equals("箱子")
@@ -162,6 +231,8 @@ public final class LinkCommand implements TabExecutor {
         plugin.msg(p, "&7平台 &f" + RuntimeEnv.label());
         for (String line : ContainerSupport.lines()) plugin.msg(p, "&7" + line);
         for (String line : Compat.lines(plugin)) plugin.msg(p, "&7" + line);
+        for (String line : DataComponents.diagLines()) plugin.msg(p, "&7" + line);
+        for (String line : ItemNbt.diagLines()) plugin.msg(p, "&7" + line);
         plugin.msg(p, "&8/link diag retry  重跑自检  ·  /link diag io  红石节点");
     }
 
@@ -226,7 +297,7 @@ public final class LinkCommand implements TabExecutor {
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         if (args.length == 1) {
             String pfx = args[0].toLowerCase(Locale.ROOT);
-            return Stream.of("chest", "互通箱", "io", "unlink", "chat", "msg", "ignore", "unignore", "reload", "version", "help", "settings", "log", "diag")
+            return Stream.of("chest", "互通箱", "io", "unlink", "chat", "msg", "ignore", "unignore", "reload", "version", "help", "settings", "log", "diag", "transport", "component", "cleanitem")
                     .filter(s -> s.startsWith(pfx))
                     .toList();
         }

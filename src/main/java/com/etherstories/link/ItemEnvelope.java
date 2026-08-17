@@ -68,6 +68,18 @@ public final class ItemEnvelope {
         return has(blob, RETURN);
     }
 
+    /** 信封内是否携带了有真实物品数据的原生快照；RETURN 凭证由 DB 托管，视为 rich。 */
+    static boolean rich(byte[] blob) {
+        if (has(blob, RETURN)) return true;
+        if (!has(blob, INITIAL)) return false;
+        try {
+            Initial x = readInitial(blob);
+            return ItemNbt.rich(x.nativeBlob());
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
     static void useResolved(Map<UUID, byte[]> payloads) {
         RESOLVED.set(payloads == null ? Map.of() : payloads);
     }
