@@ -16,20 +16,15 @@ import org.bukkit.entity.Player;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * 红石跨服。
- *
- * 发送端是红石灯，读它收到的强度 0–15，原版自己会亮，插件不碰灯态——
- * 以前每 tick 强行改灯和换方块，跟原版红石灯逻辑打架，才会抽风、把拉杆震掉。
- *
- * 接收端是标靶：它是原版自带的红石电源，power 属性就是 0–15，
- * 红石粉、中继器、比较器、活塞、门一概照常认，不用额外接比较器。
- * 之前用木桶装红石粉来表示强度，机械动力溜槽能绕过 Bukkit 事件把粉抽走，
- * 插件再补上就成了无限刷红石；标靶没有物品栏，这个洞从根上没有了。
+ * 红石跨服（事件时间戳缓冲队列，当前默认）。
+ * 电平变化写入 link_io_events，接收端按原间隔回放。
+ * 状态轮询备份：同目录 IoNet.java.state_version。
  */
 public final class IoNet {
     private static final Material RX_BODY = Material.TARGET;
@@ -46,11 +41,22 @@ public final class IoNet {
     private final Set<String> txKeys = ConcurrentHashMap.newKeySet();
     private final Set<String> rxKeys = ConcurrentHashMap.newKeySet();
     private final Set<Integer> badBody = ConcurrentHashMap.newKeySet();
+    private final Map<Integer, Block> blockCache = new ConcurrentHashMap<>();
+    
+    // 事件回放所需的额外内存结构
+    private final Map<Integer, Long> lastEventId = new ConcurrentHashMap<>();
+    private final Map<Integer, ReplaySession> replaySessions = new ConcurrentHashMap<>();
     private volatile long cacheAtMs;
 
-    public IoNet(ESLinkPlugin plugin) { this.plugin = plugin; }
+    public static class ReplaySession {
+        public final Queue<Models.IoEvent> queue = new java.util.concurrent.ConcurrentLinkedQueue<>();
+        public long lastPlayedTimeMs = 0L;
+        public long lastEventTimeMs = 0L;
+        public boolean active = false;
+    }
 
-    /** 每 tick 跑，所以电平没变时必须一件事都不做，否则就是每 tick 的方块更新风暴。 */
+    public IoNet(ESLinkPlugin plugin) { this.plugin = plugin; }
+    /** 每 tick 运行，驱动红石逻辑与事件回放 */
     public void pulse() {
         if (!plugin.store().ready() || local.isEmpty()) return;
         long now = System.currentTimeMillis();
@@ -62,7 +68,55 @@ public final class IoNet {
             } else if ("RX".equals(n.role())) {
                 if (!here) continue;
                 boolean ok = !paused(n) && live(n);
-                applyRx(n, b, NodeSigns.mapLogic(n.logic(), ok, n.peerLevel()));
+                if (!ok) {
+                    applyRx(n, b, 0);
+                    ReplaySession s = replaySessions.get(n.id());
+                    if (s != null) {
+                        s.queue.clear();
+                        s.active = false;
+                    }
+                    continue;
+                }
+
+                ReplaySession s = replaySessions.computeIfAbsent(n.id(), id -> new ReplaySession());
+                
+                // 1. 如果没有激活播放，且队列里有新事件，则初始化
+                if (!s.active && !s.queue.isEmpty()) {
+                    Models.IoEvent first = s.queue.poll();
+                    applyRx(n, b, NodeSigns.mapLogic(n.logic(), true, first.level()));
+                    s.lastPlayedTimeMs = now;
+                    s.lastEventTimeMs = first.timeMs();
+                    s.active = true;
+                }
+
+                // 2. 依次按相对时间间隔播放后续事件
+                while (s.active && !s.queue.isEmpty()) {
+                    Models.IoEvent next = s.queue.peek();
+                    long eventDelta = next.timeMs() - s.lastEventTimeMs;
+                    long playbackElapsed = now - s.lastPlayedTimeMs;
+
+                    // 安全对策：如果队列由于服务器卡顿积压超过 50 个事件，进行快进，丢弃历史并以最新状态重置
+                    if (s.queue.size() > 50) {
+                        s.queue.clear();
+                        applyRx(n, b, NodeSigns.mapLogic(n.logic(), true, next.level()));
+                        s.active = false;
+                        break;
+                    }
+
+                    if (playbackElapsed >= eventDelta) {
+                        s.queue.poll();
+                        applyRx(n, b, NodeSigns.mapLogic(n.logic(), true, next.level()));
+                        s.lastPlayedTimeMs += eventDelta; // 保持节奏线对齐
+                        s.lastEventTimeMs = next.timeMs();
+                    } else {
+                        break;
+                    }
+                }
+
+                // 3. 播放完毕重置 active 状态，以便下一次新信号进入时可以即时响应
+                if (s.queue.isEmpty()) {
+                    s.active = false;
+                }
             }
         }
     }
@@ -73,11 +127,19 @@ public final class IoNet {
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
             try {
                 var nodes = plugin.store().ioOn(plugin.serverCode());
+                
+                // 定期清理极度过期的事件（保留15秒内的事件记录，保持表大小极小）
+                try {
+                    plugin.store().pruneIoEvents(15000L);
+                } catch (Exception ignored) {
+                }
+
                 Bukkit.getScheduler().runTask(plugin, () -> {
                     try {
                         local.clear();
                         txKeys.clear();
                         rxKeys.clear();
+                        blockCache.clear();
                         cacheAtMs = System.currentTimeMillis();
                         for (var n : nodes) {
                             local.put(n.id(), n);
@@ -86,14 +148,49 @@ public final class IoNet {
                             }
                             if ("RX".equals(n.role())) {
                                 rxKeys.add(ESLinkPlugin.locKey(n.world(), n.x(), n.y(), n.z()));
-                            }
-                            Block body = block(n);
-                            if (body != null && loaded(body)) {
-                                ensureBody(n, body);
-                                // 标靶被箭射中会被原版清零，实际输出和我们记的对不上就重发。
-                                if ("RX".equals(n.role())) {
+                                Block body = block(n);
+                                if (body != null && loaded(body)) {
+                                    ensureBody(n, body);
+                                    // 标靶被箭射中会被原版清零，实际输出和我们记的对不上就重发。
                                     Integer want = hold.get(n.id());
                                     if (want != null && readSignal(body) != want) hold.remove(n.id());
+                                }
+
+                                String pair = n.pairCode();
+                                if (pair != null && !pair.isBlank()) {
+                                    Long lastId = lastEventId.get(n.id());
+                                    if (lastId == null) {
+                                        // 首次加载（冷启动）：拉取当前最大事件 ID 作为基准线，以 peerLevel() 作为初始物理电平
+                                        Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+                                            try {
+                                                long maxId = plugin.store().maxIoEventId(pair);
+                                                Bukkit.getScheduler().runTask(plugin, () -> {
+                                                    lastEventId.put(n.id(), maxId);
+                                                    if (local.containsKey(n.id())) {
+                                                        applyRx(n, block(n), NodeSigns.mapLogic(n.logic(), true, n.peerLevel()));
+                                                    }
+                                                });
+                                            } catch (Exception ignored) {
+                                            }
+                                        });
+                                    } else {
+                                        // 正常轮询：拉取新发生的改变事件，追加到播放队列中
+                                        Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+                                            try {
+                                                var events = plugin.store().ioEventsAfter(pair, lastId);
+                                                if (!events.isEmpty()) {
+                                                    Bukkit.getScheduler().runTask(plugin, () -> {
+                                                        if (local.containsKey(n.id())) {
+                                                            ReplaySession s = replaySessions.computeIfAbsent(n.id(), id -> new ReplaySession());
+                                                            s.queue.addAll(events);
+                                                            lastEventId.put(n.id(), events.get(events.size() - 1).id());
+                                                        }
+                                                    });
+                                                }
+                                            } catch (Exception ignored) {
+                                            }
+                                        });
+                                    }
                                 }
                             }
                             String st = signStatus(n);
@@ -117,23 +214,18 @@ public final class IoNet {
     public boolean isTx(String world, int x, int y, int z) {
         return txKeys.contains(ESLinkPlugin.locKey(world, x, y, z));
     }
-
     public boolean isRxNode(Block b) {
         return b != null && isRxAt(b.getWorld().getName(), b.getX(), b.getY(), b.getZ());
     }
-
     public boolean isRxAt(String world, int x, int y, int z) {
         return rxKeys.contains(ESLinkPlugin.locKey(world, x, y, z));
     }
-
     public boolean hasRxNodes() {
         return !rxKeys.isEmpty();
     }
-
     public boolean hasTxNodes() {
         return !txKeys.isEmpty();
     }
-
     public int heldAt(Block node) {
         if (node == null || !isRxNode(node)) return -1;
         for (Models.IoRow n : local.values()) {
@@ -160,7 +252,14 @@ public final class IoNet {
         for (Models.IoRow n : local.values()) {
             if (!n.world().equals(world) || (n.x() >> 4) != cx || (n.z() >> 4) != cz) continue;
             if ("TX".equals(n.role())) pushTx(n, 0, now, true);
-            if ("RX".equals(n.role())) hold.put(n.id(), 0);
+            if ("RX".equals(n.role())) {
+                hold.put(n.id(), 0);
+                ReplaySession s = replaySessions.get(n.id());
+                if (s != null) {
+                    s.queue.clear();
+                    s.active = false;
+                }
+            }
         }
     }
 
@@ -241,7 +340,12 @@ public final class IoNet {
                 } catch (Exception ignored) {
                 }
                 Bukkit.getScheduler().runTask(plugin, () -> {
-                    if ("RX".equals(role)) hold.remove(id);
+                    if ("RX".equals(role)) {
+                        hold.remove(id);
+                        lastEventId.remove(id);
+                        ReplaySession s = replaySessions.remove(id);
+                        if (s != null) s.queue.clear();
+                    }
                     if (row != null) {
                         local.put(row.id(), row);
                         refreshSign(row);
@@ -309,18 +413,27 @@ public final class IoNet {
     private void pushTx(Models.IoRow n, int level, long now, boolean force) {
         int lv = clamp(level);
         Integer prev = lastSent.get(n.id());
-        long last = lastWriteAt.getOrDefault(n.id(), 0L);
-        if (!force && prev != null && prev == lv && now - last < plugin.ioKeepaliveMs()) return;
-        boolean changed = prev == null || prev != lv;
+        
+        // 只有电平改变（或者第一次加载、强制更新）才产生写库事件
+        if (prev != null && prev == lv && !force) {
+            return;
+        }
+        
         lastSent.put(n.id(), lv);
         lastWriteAt.put(n.id(), now);
-        if (changed) signLater(n);
-        Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
-            try {
-                plugin.store().writeIoLevel(n.id(), lv);
-            } catch (Exception ignored) {
-            }
-        });
+        signLater(n);
+        
+        if (n.pairCode() != null && !n.pairCode().isBlank()) {
+            Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+                try {
+                    // 1. 同时更新 link_io 表以保证拉取基准线时的 peerLevel() 正确
+                    plugin.store().writeIoLevel(n.id(), lv);
+                    // 2. 插入具体的改变事件到 link_io_events 表
+                    plugin.store().insertIoEvent(n.pairCode(), lv, now);
+                } catch (Exception ignored) {
+                }
+            });
+        }
     }
 
     private void applyRx(Models.IoRow n, Block node, int level) {
@@ -332,7 +445,6 @@ public final class IoNet {
         signLater(n);
     }
 
-    /** 标靶的 power 就是它对外输出的红石强度。 */
     private static void writeSignal(Block node, int level) {
         int lv = clamp(level);
         BlockData cur = node.getBlockData();
@@ -343,15 +455,12 @@ public final class IoNet {
             node.setBlockData(p, true);
             return;
         }
-        // Bukkit 没给标靶单独的 BlockData 接口，映射到哪个实现类因服务端而异，
-        // cast 落空时退回按方块状态字符串构造，这条路任何实现都认。
         BlockData made = powered(lv);
         if (made == null) return;
         if (made.matches(cur)) return;
         node.setBlockData(made, true);
     }
 
-    /** 读回标靶当前的输出，读不到返回 -1。 */
     private static int readSignal(Block node) {
         BlockData d = node.getBlockData();
         if (d instanceof AnaloguePowerable p) return p.getPower();
@@ -443,9 +552,12 @@ public final class IoNet {
                 out.add("TX " + n.unit() + " 读到" + now + " 已发" + lastSent.getOrDefault(n.id(), -1)
                         + " · " + body + " · " + where);
             } else {
+                int qsize = 0;
+                ReplaySession s = replaySessions.get(n.id());
+                if (s != null) qsize = s.queue.size();
                 out.add("RX " + n.unit() + " 对端" + clamp(n.peerLevel()) + " 输出"
                         + hold.getOrDefault(n.id(), -1) + " 在线" + (live(n) ? "是" : "否")
-                        + " 落后" + peerLagMs(n) + "ms · " + body + " · " + where);
+                        + " 队列" + qsize + " · " + body + " · " + where);
             }
         }
         return out;
@@ -475,7 +587,6 @@ public final class IoNet {
         return null;
     }
 
-    /** 红石钟一秒能变几十次，牌子不能跟着刷，否则光方块更新就够卡。 */
     private void signLater(Models.IoRow n) {
         long now = System.currentTimeMillis();
         Long last = signAt.get(n.id());
@@ -492,6 +603,10 @@ public final class IoNet {
         signSnap.remove(id);
         signAt.remove(id);
         badBody.remove(id);
+        blockCache.remove(id);
+        lastEventId.remove(id);
+        ReplaySession s = replaySessions.remove(id);
+        if (s != null) s.queue.clear();
     }
 
     static int readPower(Block b) {
@@ -500,11 +615,6 @@ public final class IoNet {
         return (b.isBlockPowered() || b.isBlockIndirectlyPowered()) ? 1 : 0;
     }
 
-    /**
-     * 只在本体类型不对时换一次。发送端的灯态交给原版，插件不碰。
-     * 数据库里可能残留玩家早就挖掉的节点，那种坐标现在多半是别的方块甚至模组机器，
-     * 绝不能每轮扫描都往上盖一次。
-     */
     private void ensureBody(Models.IoRow n, Block node) {
         Material want = bodyFor(n.role());
         Material now = node.getType();
@@ -515,7 +625,6 @@ public final class IoNet {
                         + "，不动它。要恢复请 /link unlink 后重新登记。");
             return;
         }
-        // 木桶版本的接收端里塞着红石粉，直接换方块会全掉地上，等于白送。
         if (node.getState() instanceof Container c) c.getInventory().clear();
         node.setType(want, false);
         badBody.remove(n.id());
@@ -526,7 +635,6 @@ public final class IoNet {
         return "RX".equals(role) ? RX_BODY : TX_BODY;
     }
 
-    /** 含历史形态：早期用混凝土表示状态，0.1.48 短暂用过木桶。 */
     static boolean isIoBody(Material m) {
         return m == RX_BODY || m == TX_BODY || m == Material.BARREL
                 || m == Material.GRAY_CONCRETE || m == Material.RED_CONCRETE;
@@ -558,7 +666,6 @@ public final class IoNet {
         writeSignal(node, 0);
         notifyPower(node, 0);
     }
-
     private static boolean loaded(Block b) {
         return b.getWorld().isChunkLoaded(b.getX() >> 4, b.getZ() >> 4);
     }
@@ -566,17 +673,17 @@ public final class IoNet {
     private static int clamp(int v) {
         return Math.max(0, Math.min(15, v));
     }
-
     private String otherServer(String pair) {
         String self = plugin.serverCode();
         String[] p = pair.split("-");
         if (p.length < 2) return "?";
         return p[0].equalsIgnoreCase(self) ? p[1] : p[0];
     }
-
     private Block block(Models.IoRow n) {
-        World w = Bukkit.getWorld(n.world());
-        if (w == null) return null;
-        return w.getBlockAt(n.x(), n.y(), n.z());
+        return blockCache.computeIfAbsent(n.id(), id -> {
+            World w = Bukkit.getWorld(n.world());
+            if (w == null) return null;
+            return w.getBlockAt(n.x(), n.y(), n.z());
+        });
     }
 }
