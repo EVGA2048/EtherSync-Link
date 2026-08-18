@@ -33,10 +33,14 @@ final class ItemChatPaper {
     private static Component itemPart(ItemStack item) {
         String label = ItemChat.label(item, null);
         if (item == null || item.getType().isAir()) return Component.text(label);
+        // 模组物品的 asHoverEvent() 会把完整快照塞进聊天包，在模组多的服会让客户端报网络协议错误。
+        // 这里只用纯文本悬停，跨服数据库里仍保留完整 item_b64 供还原。
+        String hover = ItemCodec.display(item);
         try {
-            return Component.text(label).hoverEvent(item.asHoverEvent());
-        } catch (Throwable t) {
-            return Component.text(label).hoverEvent(HoverEvent.showText(Component.text(ItemCodec.display(item))));
+            String key = ItemKeys.id(item);
+            if (ItemKeys.usable(key)) hover = key;
+        } catch (Throwable ignored) {
         }
+        return Component.text(label).hoverEvent(HoverEvent.showText(Component.text(hover)));
     }
 }
