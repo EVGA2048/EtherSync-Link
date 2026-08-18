@@ -27,4 +27,4 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             "target/ESLink-${VER}.jar" \
             --title "ESLink ${VER}" \
-            --notes "默认启用事件时间戳红石同步：电平变化写入 link_io_events，接收端按原间隔回放。状态轮询版备份为 IoNet.java.state_version（不编译）。TX 红石灯 / RX 标靶不变。各服都换这个 jar 后重启。"
+            --notes "0.1.76：公屏 [i] 物品悬停改为纯文本，避免 Youer/模组服把物品快照塞进聊天包导致网络协议错误。跨服 item_b64 不变。各服都换这个 jar 后重启。"
