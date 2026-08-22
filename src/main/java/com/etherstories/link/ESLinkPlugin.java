@@ -127,10 +127,7 @@ public final class ESLinkPlugin extends JavaPlugin {
     }
 
     private void registerChatListener() {
-        String core = Bukkit.getName() + " " + Bukkit.getVersion();
-        boolean hybrid = core.toLowerCase(Locale.ROOT).contains("arclight")
-                || core.toLowerCase(Locale.ROOT).contains("mohist")
-                || core.toLowerCase(Locale.ROOT).contains("catserver");
+        boolean hybrid = RuntimeEnv.hybrid();
         if (!hybrid) {
             try {
                 Class.forName("io.papermc.paper.event.player.AsyncChatEvent");

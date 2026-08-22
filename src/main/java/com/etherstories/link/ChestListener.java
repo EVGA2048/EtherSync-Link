@@ -258,9 +258,9 @@ public final class ChestListener implements Listener {
     }
 
     static Block lookingNode(Player p) {
-        Block hit = p.getTargetBlockExact(6, FluidCollisionMode.NEVER);
+        Block hit = look(p, 8);
         if (hit == null) return null;
-        if (hit.getState() instanceof Sign) return attachedSolid(hit);
+        if (signLike(hit)) return attachedSolid(hit);
         if (hit.getType().isAir()) return null;
         return hit;
     }
@@ -287,7 +287,7 @@ public final class ChestListener implements Listener {
             org.bukkit.World w = org.bukkit.Bukkit.getWorld(st.lookWorld);
             if (w != null) {
                 Block b = w.getBlockAt(st.lookX, st.lookY, st.lookZ);
-                if (b.getState() instanceof Chest) return b;
+                if (chestLike(b)) return b;
             }
         }
         return lookingChest(p);
@@ -307,15 +307,82 @@ public final class ChestListener implements Listener {
     }
 
     static Block lookingChest(Player p) {
-        Block hit = p.getTargetBlockExact(6, FluidCollisionMode.NEVER);
+        Block hit = look(p, 8);
         if (hit == null) return null;
-        if (hit.getState() instanceof Chest) return hit;
-        if (hit.getState() instanceof Sign) return attachedChest(hit);
+        if (chestLike(hit)) return hit;
+        if (signLike(hit)) return attachedChest(hit);
+        return null;
+    }
+
+    /** Youer 上 getTargetBlockExact 经常空，getState() 也不一定是 Bukkit Chest。 */
+    static boolean chestLike(Block b) {
+        if (b == null) return false;
+        Material t = b.getType();
+        if (t == Material.CHEST || t == Material.TRAPPED_CHEST || t == Material.BARREL) return true;
+        try {
+            var st = b.getState();
+            return st instanceof Chest || st instanceof org.bukkit.block.Barrel;
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    static boolean signLike(Block b) {
+        if (b == null) return false;
+        try {
+            if (b.getState() instanceof Sign) return true;
+        } catch (Throwable ignored) {
+        }
+        String n = b.getType().name();
+        return n.endsWith("_SIGN") || n.equals("SIGN");
+    }
+
+    static Block look(Player p, int max) {
+        if (p == null) return null;
+        try {
+            Block b = p.getTargetBlockExact(max, FluidCollisionMode.NEVER);
+            if (b != null && !b.getType().isAir()) return b;
+        } catch (Throwable ignored) {
+        }
+        try {
+            Block b = p.getTargetBlockExact(max);
+            if (b != null && !b.getType().isAir()) return b;
+        } catch (Throwable ignored) {
+        }
+        try {
+            java.util.Set<Material> skip = java.util.EnumSet.of(
+                    Material.AIR, Material.CAVE_AIR, Material.VOID_AIR, Material.WATER, Material.LAVA);
+            Block b = p.getTargetBlock(skip, max);
+            if (b != null && !skip.contains(b.getType())) return b;
+        } catch (Throwable ignored) {
+        }
+        try {
+            var start = p.getEyeLocation();
+            var dir = start.getDirection();
+            var w = p.getWorld();
+            for (double d = 0.2; d <= max; d += 0.2) {
+                Block b = w.getBlockAt(
+                        (int) Math.floor(start.getX() + dir.getX() * d),
+                        (int) Math.floor(start.getY() + dir.getY() * d),
+                        (int) Math.floor(start.getZ() + dir.getZ() * d));
+                if (b.getType().isAir() || b.getType() == Material.WATER || b.getType() == Material.LAVA) continue;
+                return b;
+            }
+        } catch (Throwable ignored) {
+        }
         return null;
     }
 
     static Inventory chestInv(Block b) {
-        if (b != null && b.getState() instanceof Chest c) return c.getInventory();
+        if (b == null) return null;
+        try {
+            var st = b.getState();
+            if (st instanceof Chest c) return c.getInventory();
+            if (st instanceof org.bukkit.block.Barrel br) return br.getInventory();
+            if (st instanceof Container c) return c.getInventory();
+            if (st instanceof InventoryHolder h) return h.getInventory();
+        } catch (Throwable ignored) {
+        }
         return null;
     }
 

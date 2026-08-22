@@ -777,7 +777,7 @@ public final class LinkGui {
             plugin.msg(p, "请看准控制器方块或牌子，再输入 /link io。蹲下左键牌子也可打开。");
             return;
         }
-        if (b.getState() instanceof org.bukkit.block.Chest) {
+        if (ChestListener.chestLike(b)) {
             plugin.msg(p, "&c箱子请用 /link chest。");
             return;
         }
@@ -795,7 +795,7 @@ public final class LinkGui {
         }
         if (node == null) return;
         ChestListener.rememberLook(plugin, p, node);
-        boolean isChest = node.getState() instanceof org.bukkit.block.Chest;
+        boolean isChest = ChestListener.chestLike(node);
         Sessions.State st = plugin.sessions().of(p);
         st.page = Sessions.Page.CHEST;
         st.pairKind = isChest ? "chest" : "io";

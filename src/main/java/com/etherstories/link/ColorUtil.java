@@ -22,6 +22,15 @@ public final class ColorUtil {
         return ChatColor.translateAlternateColorCodes('&', out.toString());
     }
 
+    /** 只保留原版 &0-&f / &k-&r，去掉 hex。混合端客户端吃不下 §x。 */
+    public static String safe(String s) {
+        if (s == null) return "";
+        s = HEX.matcher(s).replaceAll("");
+        s = s.replaceAll("(?i)§x(§[0-9a-f]){6}", "");
+        s = s.replaceAll("(?i)&x(&[0-9a-f]){6}", "");
+        return ChatColor.translateAlternateColorCodes('&', s);
+    }
+
     /** 大厅陶瓦色 → & 码 */
     public static String dye(String color) {
         if (color == null) return "b";

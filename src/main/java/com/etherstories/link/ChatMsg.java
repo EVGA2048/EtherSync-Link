@@ -47,11 +47,27 @@ public final class ChatMsg {
     }
 
     public static void send(Player p, BaseComponent... parts) {
-        p.spigot().sendMessage(parts);
+        // Youer / 混合端把 Bungee 组件包发出去会让客户端报「网络协议错误」全员掉线。
+        // 一律走原版字符串，不要 hover / click。
+        p.sendMessage(line(parts));
+    }
+
+    public static void tell(Player p, String raw) {
+        p.sendMessage(ColorUtil.safe(raw));
+    }
+
+    public static String line(BaseComponent... parts) {
+        StringBuilder sb = new StringBuilder();
+        if (parts != null) {
+            for (BaseComponent c : parts) {
+                if (c != null) sb.append(c.toLegacyText());
+            }
+        }
+        return ColorUtil.safe(sb.toString());
     }
 
     public static void notice(Player p, String text) {
-        p.sendMessage(ColorUtil.colorize("&bESLink &7» &f" + text));
+        tell(p, "&bESLink &7» &f" + text);
     }
 
     public static void notice(Player p, BaseComponent... extra) {

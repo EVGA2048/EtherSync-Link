@@ -124,7 +124,7 @@ public final class LinkLog {
             row.addExtra(ChatMsg.copy("&a[点击复制全部]", dump, "复制到剪贴板，发给我"));
             row.addExtra(ChatMsg.legacy("  "));
             row.addExtra(ChatMsg.click("&e[打开日志书]", "/link log book", "写成书方便翻"));
-            p.spigot().sendMessage(row);
+            ChatMsg.send(p, row);
         } catch (Throwable t) {
             plugin.msg(p, "&7复制按钮不可用，改开日志书");
             giveBook(p);

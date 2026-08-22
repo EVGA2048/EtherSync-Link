@@ -54,9 +54,7 @@ public final class ChatBridge {
     public void setAll(Player p, boolean all) {
         p.getPersistentDataContainer().set(modeKey, PersistentDataType.STRING, all ? "all" : "local");
         if (all) {
-            ChatMsg.notice(p,
-                    ChatMsg.text("聊天将发到全部互通服。发言太快会拦截并在聊天栏提醒。"),
-                    ChatMsg.click(" [关互通]", "/link chat local", "点此改回仅本服"));
+            notice(p, "聊天将发到全部互通服。发言太快会拦截。/link chat local 改回仅本服");
         } else {
             notice(p, "聊天只在本服，不会传到其他服务器。");
         }
@@ -93,7 +91,7 @@ public final class ChatBridge {
         }
         String text = msg;
         String wire = MSG + name + "\u0001" + text;
-        ChatMsg.notice(p, ChatMsg.legacy("&d→ " + name + "&f: " + text));
+        ChatMsg.tell(p, "&bESLink &7» &d→ " + name + "&f: " + text);
         Player dest = Bukkit.getPlayer(name);
         if (dest != null && dest.isOnline()) {
             deliverWhisper(dest, plugin.serverCode(), plugin.serverName(), p.getName(), text);
@@ -107,6 +105,20 @@ public final class ChatBridge {
                 plugin.getLogger().warning("私聊发送失败: " + e.getMessage());
             }
         });
+    }
+
+    /** 本服显示互通聊天。必须走系统消息，不能改玩家聊天包，否则签名失败全员掉线。 */
+    public void showLocal(Player from, String raw, ItemStack item) {
+        if (from == null || !from.isOnline()) return;
+        String body = keepColor(raw);
+        if (body.isBlank()) return;
+        if (plugin.getConfig().getBoolean("chat.item", true) && ItemChat.hasToken(body)) {
+            body = ItemChat.replacePlain(body, item, null);
+        }
+        String line = localTag() + from.getName() + ": " + body;
+        String console = strip(line);
+        for (Player p : Bukkit.getOnlinePlayers()) ChatMsg.tell(p, line);
+        Bukkit.getConsoleSender().sendMessage(console);
     }
 
     public void send(Player p, String raw, ItemStack item) {
@@ -158,9 +170,7 @@ public final class ChatBridge {
         lastRemind.put(p.getUniqueId(), now);
         Bukkit.getScheduler().runTask(plugin, () -> {
             if (!p.isOnline()) return;
-            ChatMsg.notice(p,
-                    ChatMsg.text("你开着互通聊天，发言太快，这条没有传到其他服。"),
-                    ChatMsg.click(" [关闭互通]", "/link chat local", "改回仅本服"));
+            notice(p, "你开着互通聊天，发言太快，这条没有传到其他服。/link chat local 改回仅本服");
         });
     }
 
@@ -183,9 +193,7 @@ public final class ChatBridge {
             return;
         }
         addCsv(p, mutePlayersKey, name.toLowerCase(Locale.ROOT));
-        ChatMsg.notice(p,
-                ChatMsg.text("已屏蔽 " + name + " 的互通消息。"),
-                ChatMsg.click(" [取消屏蔽]", "/link unignore player " + name, "重新接收此人"));
+        notice(p, "已屏蔽 " + name + " 的互通消息。/link unignore player " + name);
     }
 
     public void ignoreServer(Player p, String code) {
@@ -195,9 +203,7 @@ public final class ChatBridge {
             return;
         }
         addCsv(p, muteServersKey, resolved.toLowerCase(Locale.ROOT));
-        ChatMsg.notice(p,
-                ChatMsg.text("已屏蔽 " + plugin.prettyName(resolved) + " 的互通消息。"),
-                ChatMsg.click(" [取消屏蔽]", "/link unignore server " + resolved, "重新接收该服"));
+        notice(p, "已屏蔽 " + plugin.prettyName(resolved) + " 的互通消息。/link unignore server " + resolved);
     }
 
     public void unignorePlayer(Player p, String name) {
@@ -289,16 +295,14 @@ public final class ChatBridge {
             decoded = ItemCodec.tryDecode(r.itemBlob(), r.itemKey(), Math.max(1, r.itemAmount()));
         }
         String pname = r.playerName() == null ? "?" : r.playerName();
-        String pfxShow = pfx.endsWith(" ") ? pfx.substring(0, pfx.length() - 1) : pfx;
-        var pfxComp = ChatMsg.click(pfxShow, "/link ignore server " + code, "点击屏蔽 " + plugin.prettyName(code) + " 的互通消息");
-        var nameComp = ChatMsg.click("&" + dye + pname, "/link ignore player " + pname, "点击屏蔽 " + pname);
-        var muteBtn = ChatMsg.click("&8 [屏蔽]", "/link ignore player " + pname, "屏蔽此人的互通消息");
-        var replyBtn = ChatMsg.suggest("&8 [回]", "/link msg " + pname + " ", "私聊 " + pname);
-        var msg = ChatMsg.itemBody(body, decoded, r.itemName());
-        String console = strip(ColorUtil.colorize(pfx)) + " " + pname + ": " + strip(ColorUtil.colorize(body));
+        if (plugin.getConfig().getBoolean("chat.item", true) && ItemChat.hasToken(ChatColor.stripColor(body))) {
+            body = ItemChat.replacePlain(body, decoded, r.itemName());
+        }
+        String line = pfx + pname + ": " + body;
+        String console = strip(ColorUtil.colorize(line));
         for (Player p : Bukkit.getOnlinePlayers()) {
             if (mutedServer(p, code) || mutedPlayer(p, pname)) continue;
-            ChatMsg.send(p, pfxComp, ChatMsg.text(" "), nameComp, ChatMsg.text(": "), msg, muteBtn, replyBtn);
+            ChatMsg.tell(p, line);
         }
         Bukkit.getConsoleSender().sendMessage(console);
     }
@@ -308,9 +312,7 @@ public final class ChatBridge {
         if (mutedServer(dest, fromCode) || mutedPlayer(dest, fromPlayer)) return;
         String shown = fromName == null || fromName.isBlank() ? plugin.prettyName(fromCode) : fromName;
         String who = fromPlayer == null ? "?" : fromPlayer;
-        ChatMsg.send(dest,
-                ChatMsg.legacy("&d[私聊] &7[" + shown + "] &e" + who + "&f: " + text),
-                ChatMsg.suggest("&8 [回]", "/link msg " + who + " ", "回复 " + who));
+        ChatMsg.tell(dest, "&d[私聊] &7[" + shown + "] &e" + who + "&f: " + text);
     }
 
     private List<String> csv(Player p, NamespacedKey k) {

@@ -24,7 +24,7 @@ public final class RuntimeEnv {
                 || classExists("net.minecraftforge.registries.ForgeRegistries")
                 || classExists("net.neoforged.bus.api.IEventBus");
         if (name.contains("arclight")) kind = Kind.ARCLIGHT;
-        else if (name.contains("mohist") || name.contains("catserver")) kind = Kind.MOHIST;
+        else if (name.contains("youer") || name.contains("mohist") || name.contains("catserver")) kind = Kind.MOHIST;
         else if (paperApi && !forge) kind = Kind.PAPER;
         else kind = Kind.OTHER;
         label = Bukkit.getName()

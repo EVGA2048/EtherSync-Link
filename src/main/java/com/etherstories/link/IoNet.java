@@ -300,7 +300,7 @@ public final class IoNet {
             plugin.msg(p, "&c请看准要当控制器的方块再输入 /link io");
             return;
         }
-        if (node.getState() instanceof Chest) {
+        if (ChestListener.chestLike(node)) {
             plugin.msg(p, "&c箱子请用 /link chest");
             return;
         }
@@ -455,6 +455,8 @@ public final class IoNet {
             node.setBlockData(p, true);
             return;
         }
+        // 标靶才有 power。红石灯走这里会整块换成 target，拆除发送端就变成标靶。
+        if (node.getType() != Material.TARGET) return;
         BlockData made = powered(lv);
         if (made == null) return;
         if (made.matches(cur)) return;
@@ -663,7 +665,9 @@ public final class IoNet {
 
     static void clearOut(Block node) {
         if (node.getState() instanceof Container c) c.getInventory().clear();
-        writeSignal(node, 0);
+        if (node.getType() == Material.TARGET || node.getBlockData() instanceof AnaloguePowerable) {
+            writeSignal(node, 0);
+        }
         notifyPower(node, 0);
     }
     private static boolean loaded(Block b) {

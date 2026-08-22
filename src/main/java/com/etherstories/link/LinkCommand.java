@@ -193,11 +193,12 @@ public final class LinkCommand implements TabExecutor {
             if (n != null && IoNet.isIoBody(n.getType())) look = n;
         }
         if (look != null) {
+            ChestListener.rememberLook(plugin, p, look);
             boolean node = (plugin.chests() != null && plugin.chests().cachedAt(
                     look.getWorld().getName(), look.getX(), look.getY(), look.getZ()) != null)
                     || (plugin.io() != null && plugin.io().cachedAt(
                     look.getWorld().getName(), look.getX(), look.getY(), look.getZ()) != null);
-            if (node) {
+            if (node || ChestListener.chestLike(look)) {
                 plugin.gui().openNodeMenu(p, look);
                 return true;
             }

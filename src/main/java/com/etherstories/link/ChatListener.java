@@ -48,30 +48,25 @@ public final class ChatListener implements Listener {
         String plain = snap != null ? snap.plain()
                 : PlainTextComponentSerializer.plainText().serialize(e.message());
         ItemStack item = snap != null ? snap.item() : p.getInventory().getItemInMainHand();
+        // 互通聊天必须取消原包：改 renderer / message 会让 1.19+ 签名对不上，
+        // Youer 上所有人立刻「网络协议错误」掉线，服务器还活着。
+        if (plugin.chat() != null && plugin.getConfig().getBoolean("chat.enabled", true)
+                && plugin.chat().isAll(p)) {
+            e.setCancelled(true);
+            try { e.viewers().clear(); } catch (Throwable ignored) {}
+            snaps.remove(p.getUniqueId());
+            ItemStack hand = item == null ? null : item.clone();
+            String msg = plain;
+            Bukkit.getScheduler().runTask(plugin, () -> {
+                plugin.chat().showLocal(p, msg, hand);
+                plugin.chat().send(p, msg, hand);
+            });
+            return;
+        }
+        if (RuntimeEnv.hybrid()) return;
         if (plugin.getConfig().getBoolean("chat.item", true) && ItemChat.hasToken(plain)) {
             e.message(ItemChatPaper.replace(plain, item));
-        } else {
-            e.message(ItemChatPaper.legacy(plain));
         }
-        if (plugin.chat() != null && plugin.chat().isAll(p)) {
-            var prev = e.renderer();
-            String tag = plugin.chat().localTag();
-            e.renderer((source, displayName, message, viewer) ->
-                    ItemChatPaper.legacy(tag).append(prev.render(source, displayName, message, viewer)));
-        }
-    }
-
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    public void onGlobal(AsyncChatEvent e) {
-        Player p = e.getPlayer();
-        Sessions.State st = plugin.sessions().of(p);
-        if (st.awaitingSearch || st.awaitingPrice || st.awaitingPair) return;
-        Snap snap = snaps.remove(p.getUniqueId());
-        if (plugin.chat() == null || !plugin.chat().isAll(p)) return;
-        String msg = snap != null ? snap.plain()
-                : PlainTextComponentSerializer.plainText().serialize(e.message());
-        ItemStack item = snap != null ? snap.item() : null;
-        plugin.chat().send(p, msg, item);
     }
 
     private void handle(Player p, Sessions.State st, String msg) {

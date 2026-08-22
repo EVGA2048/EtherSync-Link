@@ -504,11 +504,15 @@ public final class ChestNet {
 
     private void takeMany(Models.ChestRow tx, Models.ChestRow dest, int n, int bouncing) {
         Block b = block(tx);
-        if (b == null || !(b.getState() instanceof Chest chest)) {
+        if (b == null || !ChestListener.chestLike(b)) {
             txBusy.remove(tx.id());
             return;
         }
-        Inventory inv = ChestListener.chestInv(chest);
+        Inventory inv = ChestListener.chestInv(b);
+        if (inv == null) {
+            txBusy.remove(tx.id());
+            return;
+        }
         ItemStack[] contents = inv.getContents();
         List<ItemStack> lights = new ArrayList<>();
         List<Integer> lightSlots = new ArrayList<>();
@@ -769,7 +773,7 @@ public final class ChestNet {
                     + " " + decodeMs + "ms");
             Bukkit.getScheduler().runTask(plugin, () -> {
                 Block b = block(box);
-                if (b == null || !(b.getState() instanceof Chest chest)) {
+                if (b == null || !ChestListener.chestLike(b)) {
                     finishEscrows(escrow, false);
                     jam(box, "RX丢失");
                     qBusy.remove(q.id());
@@ -789,7 +793,13 @@ public final class ChestNet {
                         return;
                     }
                 }
-                var inv = ChestListener.chestInv(chest);
+                var inv = ChestListener.chestInv(b);
+                if (inv == null) {
+                    finishEscrows(escrow, false);
+                    jam(box, "RX丢失");
+                    qBusy.remove(q.id());
+                    return;
+                }
                 ItemStack[] snap = inv.getContents();
                 var leftover = inv.addItem(decoded);
                 if (!leftover.isEmpty()) {
@@ -1080,7 +1090,7 @@ public final class ChestNet {
                     + ((System.nanoTime() - decodeStarted) / 1_000_000L) + "ms");
             Bukkit.getScheduler().runTask(plugin, () -> {
                 Block b = block(box);
-                if (b == null || !(b.getState() instanceof Chest chest)) {
+                if (b == null || !ChestListener.chestLike(b)) {
                     setStatus(send, "noback");
                     qBusy.remove(q.id());
                     return;
@@ -1090,7 +1100,12 @@ public final class ChestNet {
                     quarantine(q, "回退容器构建失败，已熔断");
                     return;
                 }
-                var inv = chest.getInventory();
+                var inv = ChestListener.chestInv(b);
+                if (inv == null) {
+                    setStatus(send, "noback");
+                    qBusy.remove(q.id());
+                    return;
+                }
                 ItemStack[] snap = inv.getContents();
                 var leftover = inv.addItem(decoded);
                 if (!leftover.isEmpty()) {
