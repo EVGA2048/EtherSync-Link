@@ -2,7 +2,7 @@
 # 新版本会自动补缺失的键，不会改你已经填过的值。
 # /link 大厅    /link chest    /link io    /link settings
 
-config-version: 17
+config-version: 21
 config:
   auto-fill-missing: true
 
@@ -86,6 +86,15 @@ trade:
   self-buy-surcharge: 0
   self-buy-cooldown-seconds: 20
   self-buy-daily: 12
+  # 1 本服货币 = link-rate 互通货币。例如 1:1.5 填 1.5。货单按互通计价，买家界面换算成本服（含税）。
+  link-rate: 1
+  # 互通钱包：本服按汇率存入，到另一台服按当地汇率取出。走共享 MySQL，同一 UUID。
+  wallet: true
+  # 离线服请保持开启。取件码全服唯一，上架服「我的上架」可再看，也可发给别人代领。
+  claim-code: true
+  claim-miss-limit: 5
+  claim-miss-lock-minutes: 30
+  claim-head-lock-minutes: 60
 
 # 独立市场服务（Python，自带 SQLite）。未登记时货单仍走上方 MySQL。
 # 管理可用 /link market add <代号> <地址> <令牌> [名称]，写入本段并在重启后保留。

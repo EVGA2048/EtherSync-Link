@@ -9,7 +9,7 @@ import java.util.concurrent.ConcurrentHashMap;
 /** GUI / 聊天检索会话 */
 public final class Sessions {
 
-    public enum Page { HOME, MARKET, SELLER, LIST, MINE, PAIR, CONFIRM, ADMIN, SETTINGS, COLORS, SERVERS, CHEST, WATCH, NODES, ADMIN_NODES, CHAT }
+    public enum Page { HOME, MARKET, SELLER, LIST, MINE, PAIR, CONFIRM, ADMIN, SETTINGS, COLORS, SERVERS, CHEST, WATCH, NODES, ADMIN_NODES, CHAT, WALLET, CLAIM_WHO }
 
     public static final class State {
         public Page page = Page.HOME;
@@ -25,6 +25,12 @@ public final class Sessions {
         public boolean awaitingSearch;
         public boolean awaitingPrice;
         public boolean awaitingPair;
+        public boolean awaitingWallet;
+        public boolean walletOut;
+        public boolean awaitingClaim;
+        public long claimListingId;
+        public boolean awaitingWalletPin;
+        public boolean walletUnlocked;
         public long repriceId;
         public int listAmount;
         public org.bukkit.inventory.ItemStack listItem;

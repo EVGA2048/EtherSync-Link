@@ -159,7 +159,15 @@ markets:
 
 ## 经济
 
-要 Vault。`trade.tax-rate` 在买家这台服收，卖家拿标价。税进 `trade.sink-account`，空着就试 ES2UniPlugin，再空税就没了。
+要 Vault。货单按**互通货币**记账。每台服自己设 `trade.link-rate`：1 本服货币 = 该数值互通。例如 1:1.5 填 `1.5`。玩家上架输入本服价格，插件乘汇率后写入货单。买家界面会换算成**本服货币**，税也按本服换算后的价格收。
+
+`trade.tax-rate` 在买家这台服收，卖家拿换算后的标价（不含税）。税进 `trade.sink-account`，空着就试 ES2UniPlugin，再空税就没了。
+
+管理可在 `/link settings` 用按钮调汇率（点击 ±0.1，潜行 ±0.01）。默认 `1.0`，旧货单按 1:1 看待。
+
+**给自己跨服转账**：大厅金锭或 `/link wallet`。本服存入（× 本服汇率 → 互通余额），到另一台服取出（÷ 当地汇率 → 当地货币）。同一 UUID，走共享 MySQL，不经过市场服务。`trade.wallet: false` 可关。首次存入会给 6 位钱包码，取出必须输入。
+
+离线服（没开正版验证）UUID 等于玩家名，别人可以冒名。因此默认 `trade.claim-code: true`：只能在上架那台服下架/改价。取件码全服唯一，上架服「我的上架」随时能再看，也可发给别人代领。领取时输入码后要点出货主头像（五个本服见过的头）。不存在的码连输 5 次、或点错头像，会暂停取件并通知管理。旧货没有取件码的，只能回上架服下架。管理可用 `/link pinreset <玩家>` 清钱包码。
 
 同一 UUID、货在外服，叫取回：
 
@@ -225,6 +233,9 @@ markets:
 | `/link ignore` / `unignore` | 屏蔽 |
 | `/link help` | 说明书 |
 | `/link settings` | 设置 |
+| `/link wallet` | 互通余额（给自己跨服转账） |
+| `/link claim` | 输入取件码领取（可代领） |
+| `/link pinreset <玩家>` | 清除钱包码（管理） |
 | `/link cleanitem` | 清占位标记 |
 | `/link reload` | 重载（管理） |
 | `/link market …` | 登记市场（管理） |

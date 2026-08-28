@@ -52,6 +52,13 @@ public final class GuiListener implements Listener {
                 plugin.gui().openMarket(p);
             }
             case "mine" -> plugin.gui().openMine(p);
+            case "wallet" -> plugin.gui().openWallet(p);
+            case "wallet-in" -> plugin.gui().beginWallet(p, false);
+            case "wallet-out" -> plugin.gui().beginWallet(p, true);
+            case "wallet-out-all" -> plugin.gui().walletOutAll(p);
+            case "claim" -> plugin.gui().beginClaimCode(p);
+            case "claim-who" -> plugin.gui().pickClaimWho(p, Items.id(plugin, stack), Items.data(plugin, stack));
+            case "buy-pickup" -> plugin.gui().beginClaimCode(p);
             case "sell" -> plugin.gui().beginSell(p);
             case "help" -> plugin.gui().openChestMenu(p);
             case "io" -> plugin.gui().openIoMenu(p);
@@ -229,6 +236,16 @@ public final class GuiListener implements Listener {
                 plugin.setTradeEnabled(!plugin.tradeEnabled());
                 plugin.gui().openSettings(p);
             }
+            case "wallet-tog" -> {
+                if (!p.hasPermission("eslink.admin")) return;
+                plugin.setWalletEnabled(!plugin.walletEnabled());
+                plugin.gui().openSettings(p);
+            }
+            case "claim-tog" -> {
+                if (!p.hasPermission("eslink.admin")) return;
+                plugin.setClaimCodeEnabled(!plugin.claimCodeEnabled());
+                plugin.gui().openSettings(p);
+            }
             case "tax-down" -> {
                 if (!p.hasPermission("eslink.admin")) return;
                 plugin.setTaxRate(plugin.taxRate() - 0.01);
@@ -237,6 +254,18 @@ public final class GuiListener implements Listener {
             case "tax-up" -> {
                 if (!p.hasPermission("eslink.admin")) return;
                 plugin.setTaxRate(plugin.taxRate() + 0.01);
+                plugin.gui().openSettings(p);
+            }
+            case "rate-down" -> {
+                if (!p.hasPermission("eslink.admin")) return;
+                double step = e.isShiftClick() ? 0.01 : 0.1;
+                plugin.setLinkRate(plugin.linkRate() - step);
+                plugin.gui().openSettings(p);
+            }
+            case "rate-up" -> {
+                if (!p.hasPermission("eslink.admin")) return;
+                double step = e.isShiftClick() ? 0.01 : 0.1;
+                plugin.setLinkRate(plugin.linkRate() + step);
                 plugin.gui().openSettings(p);
             }
             case "colors" -> plugin.gui().openColors(p);
@@ -255,6 +284,7 @@ public final class GuiListener implements Listener {
             case "search" -> {
                 st.awaitingSearch = true;
                 st.awaitingPrice = false;
+                st.awaitingWallet = false;
                 p.closeInventory();
                 plugin.msg(p, "请在聊天栏输入要搜索的物品名，回车后返回市场。输入 cancel 取消。");
             }

@@ -7,6 +7,7 @@ import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 
@@ -23,8 +24,10 @@ public final class LinkGui {
         st.awaitingPair = false;
         async(() -> {
             List<Models.ServerRow> servers;
+            double wallet = 0;
             try {
                 servers = plugin.store().ready() ? plugin.store().servers() : List.of();
+                if (plugin.store().ready()) wallet = plugin.store().walletOf(p.getUniqueId());
             } catch (Exception e) {
                 sync(() -> plugin.msg(p, "无法读取服务器列表：" + e.getMessage()));
                 return;
@@ -34,6 +37,7 @@ public final class LinkGui {
             List<MarketHub> hubs = plugin.markets().hubs();
             String marketName = plugin.markets().selectedName(p);
             MarketHub cur = plugin.markets().selected(p);
+            double walletBal = wallet;
             sync(() -> {
                 if (!p.isOnline()) return;
                 LinkHolder h = new LinkHolder("home");
@@ -71,10 +75,21 @@ public final class LinkGui {
                 else if (!plugin.markets().httpEnabled()) marketLore.add("&7使用本服 MySQL 货单");
                 marketLore.add("&8点击打开");
                 inv.setItem(20, tag("market", "", 0, Items.named(Material.CHEST, "&e跨服市场", marketLore)));
+                inv.setItem(21, tag("claim", "", 0, Items.named(Material.TRIPWIRE_HOOK, "&e取件",
+                        List.of("&7输入 6 位取件码领取货物",
+                                "&7可代领别人发给你的码",
+                                "&8随后会请你点出货主头像"))));
                 inv.setItem(22, tag("sell", "", 0, Items.named(Material.EMERALD, "&a上架主手物品",
-                        List.of("&7将主手物品上架到当前市场", "&8随后在聊天栏输入单价"))));
+                        List.of("&7将主手物品上架到当前市场", "&8随后在聊天栏输入本服单价"))));
                 inv.setItem(24, tag("mine", "", 0, Items.named(Material.ENDER_CHEST, "&b我的上架",
                         List.of("&7当前市场中你正在出售的物品", "&8下架后物品退回背包"))));
+                List<String> walletLore = new ArrayList<>();
+                walletLore.add("&7互通余额 &f" + ESLinkPlugin.stripZeros(walletBal));
+                walletLore.add("&7约合本服 &a" + plugin.money(plugin.toLocal(walletBal)));
+                walletLore.add("&7本服汇率 &f" + plugin.linkRateText());
+                walletLore.add("&8同一账号，在另一台服取出");
+                walletLore.add("&8点击打开");
+                inv.setItem(26, tag("wallet", "", 0, Items.named(Material.GOLD_INGOT, "&e互通余额", walletLore)));
                 inv.setItem(29, tag("io", "", 0, Items.named(Material.REDSTONE_LAMP, "&c跨服红石",
                         List.of("&7对准红石灯后点这里，或输入",
                                 "&f/link io",
@@ -145,6 +160,7 @@ public final class LinkGui {
                 return;
             }
             List<Models.ServerRow> sv = servers;
+            plugin.rememberServers(sv);
             List<Models.Listing> ls = rows;
             List<MarketHub> hubs = plugin.markets().hubs();
             MarketHub cur = plugin.markets().selected(p);
@@ -192,7 +208,7 @@ public final class LinkGui {
                 }
 
                 for (int i = 0; i < PAGE; i++) {
-                    if (i < ls.size()) inv.setItem(9 + i, listingIcon(ls.get(i), buyHint(ls.get(i), p)));
+                    if (i < ls.size()) inv.setItem(9 + i, listingIcon(ls.get(i), buyHint(ls.get(i), p), p));
                 }
                 inv.setItem(45, tag("page", "prev", 0, Items.named(Material.ARROW, "&f上一页",
                         List.of("&8更早的货物"))));
@@ -210,6 +226,10 @@ public final class LinkGui {
                         List.of("&7主手持有物品后再点"))));
                 inv.setItem(51, tag("mine", "", 0, Items.named(Material.ENDER_CHEST, "&b我的上架",
                         List.of("&7下架后物品退回背包"))));
+                if (plugin.claimCodeEnabled()) {
+                    inv.setItem(52, tag("claim", "", 0, Items.named(Material.TRIPWIRE_HOOK, "&e取件",
+                            List.of("&7输入 6 位取件码", "&8可代领"))));
+                }
                 p.openInventory(inv);
             });
         });
@@ -293,7 +313,13 @@ public final class LinkGui {
                 h.inv = inv;
                 fillGlass(inv);
                 for (int i = 0; i < ls.size() && i < PAGE; i++) {
-                    inv.setItem(i, listingIcon(ls.get(i), "&8左键下架  右键改价"));
+                    Models.Listing L = ls.get(i);
+                    boolean local = plugin.localListing(L);
+                    String hint;
+                    if (local) hint = "&8左键下架  右键改价";
+                    else if (plugin.claimCodeEnabled()) hint = "&8请到上架所在服务器下架；跨服请用取件码（可代领）";
+                    else hint = "&8左键下架  右键改价";
+                    inv.setItem(i, listingIcon(L, hint, p));
                 }
                 inv.setItem(49, tag("home", "", 0, Items.named(Material.OAK_DOOR, "&7返回", null)));
                 p.openInventory(inv);
@@ -330,7 +356,7 @@ public final class LinkGui {
                 if (p.hasPermission("eslink.admin")) headLore.add("&8" + seller);
                 inv.setItem(4, tag("noop", "", 0, Items.playerHead(seller, "&f" + name, headLore)));
                 for (int i = 0; i < ls.size() && i < 36; i++) {
-                    inv.setItem(9 + i, listingIcon(ls.get(i), buyHint(ls.get(i), p)));
+                    inv.setItem(9 + i, listingIcon(ls.get(i), buyHint(ls.get(i), p), p));
                 }
                 inv.setItem(45, tag("market", "", 0, Items.named(Material.ARROW, "&7返回市场", null)));
                 if (p.hasPermission("eslink.admin") && local) {
@@ -370,34 +396,40 @@ public final class LinkGui {
                 Inventory inv = Bukkit.createInventory(h, 27, ColorUtil.colorize("&6&l确认购买"));
                 h.inv = inv;
                 fillGlass(inv);
-                inv.setItem(13, listingIcon(L, "&7请确认物品与价格"));
+                inv.setItem(13, listingIcon(L, "&7请确认物品与价格", p));
                 boolean vault = plugin.vault().ok();
                 String bal = vault ? plugin.vault().format(plugin.vault().bal(p)) : "本服未接入经济";
                 inv.setItem(11, tag("buy-no", "", 0, Items.named(Material.RED_CONCRETE, "&c取消",
                         List.of("&8返回市场"))));
-                double tax = plugin.taxOf(L.price());
+                double localPay = plugin.toLocal(L.price());
                 List<String> buyLore = new ArrayList<>();
-                buyLore.add("&7价格 &f" + (vault ? plugin.vault().format(L.price()) : String.valueOf(L.price())));
-                if (tax > 0) {
-                    buyLore.add("&7互通税 &e" + plugin.vault().format(tax) + " &8(" + plugin.taxRateText() + ")");
-                    buyLore.add("&7实付 &c" + plugin.vault().format(L.price() + tax));
-                }
+                buyLore.addAll(priceLore(L));
                 buyLore.add("&7余额 &f" + bal);
                 buyLore.add("&7卖家 &f" + L.sellerName());
                 buyLore.add("&7来自 &f" + plugin.prettyName(L.serverCode()));
                 boolean self = plugin.selfListing(L, p);
-                boolean local = plugin.localListing(L);
-                if (self && local) {
+                boolean onThisServer = plugin.localListing(L);
+                if (self && onThisServer) {
                     inv.setItem(15, tag("buy-no", "", 0, Items.named(Material.BARRIER, "&c这是你在本服上架的物品",
                             List.of("&7请打开「我的上架」并下架", "&8不必购买"))));
                 } else if (self) {
                     if (!plugin.selfBuyEnabled()) {
                         inv.setItem(15, tag("buy-no", "", 0, Items.named(Material.BARRIER, "&c本服未开放跨服取回",
                                 List.of("&7请到上架所在服务器下架"))));
-                    } else {
-                        double fee = plugin.selfBuyFee(L.price());
+                    } else if (plugin.claimCodeEnabled() && !L.hasClaim()) {
+                        inv.setItem(15, tag("buy-no", "", 0, Items.named(Material.BARRIER, "&c此货没有取件码",
+                                List.of("&7请到上架所在服务器下架"))));
+                    } else if (plugin.claimCodeEnabled()) {
+                        double fee = plugin.selfBuyFee(localPay);
                         String feeTxt = vault ? plugin.vault().format(fee) : String.valueOf(fee);
-                        buyLore.add("&e跨服取回：货款不会打入你的账户");
+                        buyLore.add("&e跨服取回请输入取件码，也可让别人代领");
+                        buyLore.add("&7费用 &c" + feeTxt);
+                        inv.setItem(15, tag("buy-pickup", "", L.id(),
+                                Items.named(Material.LIME_CONCRETE, "&a去取件", buyLore)));
+                    } else {
+                        double fee = plugin.selfBuyFee(localPay);
+                        String feeTxt = vault ? plugin.vault().format(fee) : String.valueOf(fee);
+                        buyLore.add("&e跨服取回");
                         buyLore.add("&7费用 &c" + feeTxt);
                         inv.setItem(15, tag("buy-yes", "", L.id(),
                                 Items.named(Material.LIME_CONCRETE, "&a确认取回", buyLore)));
@@ -677,9 +709,11 @@ public final class LinkGui {
         st.listAmount = hand.getAmount();
         st.awaitingPrice = true;
         st.awaitingSearch = false;
+        st.awaitingWallet = false;
         st.repriceId = 0;
         p.closeInventory();
-        plugin.msg(p, "请在聊天栏输入单价（数字），或输入 cancel 取消。数量 " + st.listAmount + "。");
+        plugin.msg(p, "请在聊天栏输入单价（本服货币）。汇率 " + plugin.linkRateText()
+                + "，将记成互通价格。cancel 取消。数量 " + st.listAmount + "。");
     }
 
     public void finishSell(Player p, double price) {
@@ -709,11 +743,17 @@ public final class LinkGui {
         int amt = st.listAmount;
         async(() -> {
             try {
+                String claim = plugin.claimCodeEnabled() ? plugin.markets().allocClaimCode(p) : "";
                 plugin.markets().insert(p, p.getUniqueId(), p.getName(), plugin.serverCode(),
-                        key, name, amt, price, b64, NestedItems.csv(take));
+                        key, name, amt, plugin.toLink(price), b64, NestedItems.csv(take), claim);
                 sync(() -> {
                     plugin.alerts().listingLocal(p, name, amt, price);
-                    plugin.msg(p, "已上架 " + name + " ×" + amt + " 至「" + plugin.markets().selectedName(p) + "」。");
+                    plugin.msg(p, "已上架 " + name + " ×" + amt
+                            + "，本服 " + plugin.money(price)
+                            + "（互通 " + ESLinkPlugin.stripZeros(plugin.toLink(price)) + "）。");
+                    if (!claim.isEmpty()) {
+                        plugin.msg(p, "&e取件码 &f" + claim + " &7本服「我的上架」随时能再看。可以发给别人代领。");
+                    }
                     openMine(p);
                 });
             } catch (Exception e) {
@@ -747,6 +787,10 @@ public final class LinkGui {
                 return;
             }
             boolean selfRemote = L.seller().equals(p.getUniqueId());
+            if (selfRemote && plugin.claimCodeEnabled() && !plugin.localListing(L)) {
+                sync(() -> beginClaimCode(p));
+                return;
+            }
             Models.Listing row = L;
             sync(() -> {
                 if (!plugin.tradeEnabled()) {
@@ -764,8 +808,9 @@ public final class LinkGui {
                         return;
                     }
                 }
-                double tax = plugin.taxOf(row.price());
-                double pay = selfRemote ? plugin.selfBuyFee(row.price()) : row.price() + tax;
+                double local = plugin.toLocal(row.price());
+                double tax = plugin.taxOf(local);
+                double pay = selfRemote ? plugin.selfBuyFee(local) : local + tax;
                 if (pay > 0) {
                     if (!plugin.vault().ok()) {
                         plugin.msg(p, "本服未接入经济，无法购买标价物品。");
@@ -802,7 +847,7 @@ public final class LinkGui {
                             if (pay > 0) plugin.depositTax(pay);
                         } else {
                             if (got.price() > 0 && plugin.vault().ok()) {
-                                plugin.vault().deposit(Bukkit.getOfflinePlayer(got.seller()), got.price());
+                                plugin.vault().deposit(Bukkit.getOfflinePlayer(got.seller()), plugin.toLocal(got.price()));
                             }
                             if (tax > 0) plugin.depositTax(tax);
                         }
@@ -842,6 +887,10 @@ public final class LinkGui {
                     sync(() -> plugin.msg(p, "只能管理本服成员的上架。"));
                     return;
                 }
+                if (L.seller().equals(p.getUniqueId()) && plugin.claimCodeEnabled() && !plugin.localListing(L)) {
+                    sync(() -> plugin.msg(p, "离线服不能在外服下架。请到上架所在服务器下架，或使用取件码（可代领）。"));
+                    return;
+                }
                 if (!plugin.markets().delete(p, id)) {
                     sync(() -> plugin.msg(p, "下架失败。"));
                     return;
@@ -870,13 +919,282 @@ public final class LinkGui {
 
     public void beginReprice(Player p, long id) {
         if (id <= 0) return;
+        async(() -> {
+            try {
+                Models.Listing L = plugin.markets().listing(p, id);
+                if (L != null && L.seller().equals(p.getUniqueId())
+                        && plugin.claimCodeEnabled() && !plugin.localListing(L)) {
+                    sync(() -> plugin.msg(p, "请到上架所在服务器改价。"));
+                    return;
+                }
+            } catch (Exception ignored) {}
+            sync(() -> {
+                Sessions.State st = plugin.sessions().of(p);
+                st.repriceId = id;
+                st.awaitingPrice = true;
+                st.awaitingSearch = false;
+                st.awaitingWallet = false;
+                st.awaitingClaim = false;
+                st.listItem = null;
+                p.closeInventory();
+                plugin.msg(p, "请在聊天栏输入新单价（本服货币）。汇率 " + plugin.linkRateText()
+                        + "，将记成互通价格。cancel 取消。");
+            });
+        });
+    }
+
+    public void beginClaimCode(Player p) {
+        if (!plugin.claimCodeEnabled()) {
+            plugin.msg(p, "本服未开启取件码。");
+            return;
+        }
+        String lock = plugin.pickupLocked(p);
+        if (lock != null) {
+            plugin.msg(p, lock);
+            return;
+        }
+        String blocked = plugin.markets().requireReady(p);
+        if (blocked != null) {
+            plugin.msg(p, blocked);
+            return;
+        }
         Sessions.State st = plugin.sessions().of(p);
-        st.repriceId = id;
-        st.awaitingPrice = true;
+        st.awaitingClaim = true;
+        st.claimListingId = 0;
+        st.awaitingPrice = false;
         st.awaitingSearch = false;
-        st.listItem = null;
+        st.awaitingWallet = false;
+        st.awaitingWalletPin = false;
         p.closeInventory();
-        plugin.msg(p, "请在聊天栏输入新单价（数字），或输入 cancel 取消。");
+        plugin.msg(p, "请输入 6 位取件码。别人发给你的也可以。cancel 取消。");
+    }
+
+    public void finishClaim(Player p, String raw) {
+        Sessions.State st = plugin.sessions().of(p);
+        st.awaitingClaim = false;
+        String lock = plugin.pickupLocked(p);
+        if (lock != null) {
+            plugin.msg(p, lock);
+            return;
+        }
+        if (!ClaimCodes.plausible(raw)) {
+            plugin.msg(p, "取件码应为 6 位数字。");
+            return;
+        }
+        async(() -> {
+            Models.Listing L;
+            try {
+                L = plugin.markets().listingByClaim(p, raw);
+            } catch (Exception e) {
+                sync(() -> plugin.msg(p, "查询失败。"));
+                return;
+            }
+            sync(() -> {
+                if (L == null) {
+                    plugin.pickupMiss(p);
+                    String again = plugin.pickupLocked(p);
+                    if (again == null) plugin.msg(p, "没有这个取件码。");
+                    return;
+                }
+                plugin.pickupMissReset(p);
+                openClaimWho(p, L);
+            });
+        });
+    }
+
+    public void openClaimWho(Player p, Models.Listing L) {
+        if (L == null) return;
+        String lock = plugin.pickupLocked(p);
+        if (lock != null) {
+            plugin.msg(p, lock);
+            return;
+        }
+        Sessions.State st = plugin.sessions().of(p);
+        st.page = Sessions.Page.CLAIM_WHO;
+        st.claimListingId = L.id();
+        async(() -> {
+            List<Store.Seen> pool = new ArrayList<>();
+            if (plugin.store().ready()) {
+                try {
+                    pool.addAll(plugin.store().seenOthers(plugin.serverCode(), L.seller(), 24));
+                } catch (Exception ignored) {}
+            }
+            List<Store.Seen> extra = pool;
+            Models.Listing row = L;
+            sync(() -> {
+                if (!p.isOnline()) return;
+                List<Store.Seen> heads = new ArrayList<>();
+                heads.add(new Store.Seen(row.seller(), row.sellerName()));
+                Collections.shuffle(extra);
+                for (Store.Seen s : extra) {
+                    if (heads.size() >= 5) break;
+                    boolean dup = false;
+                    for (Store.Seen h : heads) {
+                        if (h.uuid().equals(s.uuid())) { dup = true; break; }
+                    }
+                    if (!dup) heads.add(s);
+                }
+                for (Player on : Bukkit.getOnlinePlayers()) {
+                    if (heads.size() >= 5) break;
+                    boolean dup = false;
+                    for (Store.Seen h : heads) {
+                        if (h.uuid().equals(on.getUniqueId())) { dup = true; break; }
+                    }
+                    if (!dup) heads.add(new Store.Seen(on.getUniqueId(), on.getName()));
+                }
+                int n = 0;
+                while (heads.size() < 5 && n++ < 8) {
+                    UUID fake = UUID.randomUUID();
+                    heads.add(new Store.Seen(fake, "路人"));
+                }
+                Collections.shuffle(heads);
+                if (heads.size() > 5) heads = new ArrayList<>(heads.subList(0, 5));
+                LinkHolder h = new LinkHolder("claim-who");
+                Inventory inv = Bukkit.createInventory(h, 27, ColorUtil.colorize("&e&l这个物品是谁的？"));
+                h.inv = inv;
+                fillGlass(inv);
+                inv.setItem(4, listingIcon(row, "&7点出上架的人。点错将暂停取件。", null));
+                int[] slots = {20, 21, 22, 23, 24};
+                for (int i = 0; i < heads.size() && i < slots.length; i++) {
+                    Store.Seen s = heads.get(i);
+                    String nm = s.name() == null || s.name().isBlank() ? s.uuid().toString().substring(0, 8) : s.name();
+                    ItemStack skull = Items.playerHead(s.uuid(), "&f" + nm,
+                            List.of("&8点击选择"));
+                    inv.setItem(slots[i], tag("claim-who", s.uuid().toString(), row.id(), skull));
+                }
+                inv.setItem(18, tag("claim", "", 0, Items.named(Material.ARROW, "&7重新输入取件码", null)));
+                p.openInventory(inv);
+            });
+        });
+    }
+
+    public void pickClaimWho(Player p, long listingId, String uuidStr) {
+        String lock = plugin.pickupLocked(p);
+        if (lock != null) {
+            plugin.msg(p, lock);
+            p.closeInventory();
+            return;
+        }
+        Sessions.State st = plugin.sessions().of(p);
+        if (st.page != Sessions.Page.CLAIM_WHO || st.claimListingId != listingId || listingId <= 0) {
+            plugin.msg(p, "请先输入取件码。");
+            return;
+        }
+        st.claimListingId = 0;
+        UUID picked;
+        try {
+            picked = UUID.fromString(uuidStr);
+        } catch (Exception e) {
+            plugin.msg(p, "无效选择。");
+            return;
+        }
+        async(() -> {
+            Models.Listing L;
+            try {
+                L = plugin.markets().listing(p, listingId);
+            } catch (Exception e) {
+                sync(() -> plugin.msg(p, "无法读取货单。"));
+                return;
+            }
+            if (L == null) {
+                sync(() -> plugin.msg(p, "这件货物已经不在市场上。"));
+                return;
+            }
+            if (!L.seller().equals(picked)) {
+                sync(() -> {
+                    plugin.pickupHeadFail(p);
+                    p.closeInventory();
+                    plugin.msg(p, plugin.pickupLocked(p) == null
+                            ? "点错了，取件已暂停。"
+                            : plugin.pickupLocked(p));
+                });
+                return;
+            }
+            sync(() -> doPickup(p, L.id()));
+        });
+    }
+
+    public void doPickup(Player p, long id) {
+        async(() -> {
+            Models.Listing L;
+            try {
+                L = plugin.markets().listing(p, id);
+            } catch (Exception e) {
+                sync(() -> plugin.msg(p, "无法读取货单。"));
+                return;
+            }
+            if (L == null) {
+                sync(() -> plugin.msg(p, "这件货物已经不在市场上。"));
+                return;
+            }
+            if (plugin.localListing(L) && L.seller().equals(p.getUniqueId())) {
+                sync(() -> plugin.msg(p, "这是你在本服上架的物品。请打开「我的上架」并下架。"));
+                return;
+            }
+            Models.Listing row = L;
+            sync(() -> {
+                if (!plugin.tradeEnabled()) {
+                    plugin.msg(p, "本服已关闭互通交易。");
+                    return;
+                }
+                if (!ItemCodec.known(row.blob(), row.itemKey(), row.nestedKeys())) {
+                    plugin.msg(p, "本服无法识别该物品，无法领取（" + row.itemKey() + "）。");
+                    return;
+                }
+                String gate = plugin.selfBuyGate(p);
+                if (gate != null) {
+                    plugin.msg(p, gate);
+                    return;
+                }
+                double local = plugin.toLocal(row.price());
+                double pay = plugin.selfBuyFee(local);
+                if (pay > 0) {
+                    if (!plugin.vault().ok()) {
+                        plugin.msg(p, "本服未接入经济，无法领取。");
+                        return;
+                    }
+                    String err = plugin.vault().withdraw(p, pay);
+                    if (err != null) {
+                        plugin.msg(p, err);
+                        return;
+                    }
+                }
+                async(() -> {
+                    Models.Listing claimed;
+                    try {
+                        claimed = plugin.markets().claim(p, row.id());
+                        if (claimed == null) {
+                            sync(() -> {
+                                if (pay > 0 && plugin.vault().ok()) plugin.vault().deposit(p, pay);
+                                plugin.msg(p, "货物已被取走，费用已退回。");
+                            });
+                            return;
+                        }
+                    } catch (Exception e) {
+                        sync(() -> {
+                            if (pay > 0 && plugin.vault().ok()) plugin.vault().deposit(p, pay);
+                            plugin.msg(p, "结算失败，费用已退回。");
+                        });
+                        return;
+                    }
+                    Models.Listing got = claimed;
+                    sync(() -> {
+                        plugin.selfBuyMark(p);
+                        if (pay > 0) plugin.depositTax(pay);
+                        ItemStack give = ItemCodec.decode(got.blob(), got.itemKey(), got.amount(), got.nestedKeys());
+                        var leftover = p.getInventory().addItem(give);
+                        boolean dropped = !leftover.isEmpty();
+                        leftover.values().forEach(it -> p.getWorld().dropItemNaturally(p.getLocation(), it));
+                        boolean proxy = !got.seller().equals(p.getUniqueId());
+                        plugin.msg(p, (proxy ? "已代领 " : "已取件 ")
+                                + got.itemName() + " ×" + got.amount()
+                                + (pay > 0 ? "（费用 " + plugin.vault().format(pay) + "）" : "") + "。");
+                        if (dropped) plugin.msg(p, "背包已满，多余物品掉落在脚下。");
+                        openMarket(p);
+                    });
+                });
+            });
+        });
     }
 
     public void finishReprice(Player p, double price) {
@@ -907,14 +1225,321 @@ public final class LinkGui {
                     sync(() -> plugin.msg(p, "只能管理本服成员的上架。"));
                     return;
                 }
-                plugin.markets().setPrice(p, id, price);
+                if (L.seller().equals(p.getUniqueId()) && plugin.claimCodeEnabled() && !plugin.localListing(L)) {
+                    sync(() -> plugin.msg(p, "请到上架所在服务器改价。"));
+                    return;
+                }
+                plugin.markets().setPrice(p, id, plugin.toLink(price));
                 sync(() -> {
-                    plugin.msg(p, "已改价为 " + (plugin.vault().ok() ? plugin.vault().format(price) : String.valueOf(price)) + "。");
+                    plugin.msg(p, "已改价为本服 " + plugin.money(price)
+                            + "（互通 " + ESLinkPlugin.stripZeros(plugin.toLink(price)) + "）。");
                     openMine(p);
                 });
             } catch (Exception e) {
                 sync(() -> plugin.msg(p, "&c改价失败"));
             }
+        });
+    }
+
+    public void openWallet(Player p) {
+        if (!plugin.store().ready()) {
+            plugin.msg(p, "互通数据库未连接，无法使用钱包。");
+            return;
+        }
+        if (!plugin.vault().ok()) {
+            plugin.msg(p, "本服未接入经济，无法使用钱包。");
+            return;
+        }
+        Sessions.State st = plugin.sessions().of(p);
+        st.page = Sessions.Page.WALLET;
+        async(() -> {
+            double link;
+            try {
+                link = plugin.store().walletOf(p.getUniqueId());
+            } catch (Exception e) {
+                sync(() -> plugin.msg(p, "无法读取互通余额。"));
+                return;
+            }
+            double wallet = link;
+            sync(() -> {
+                if (!p.isOnline()) return;
+                LinkHolder h = new LinkHolder("wallet");
+                Inventory inv = Bukkit.createInventory(h, 27, ColorUtil.colorize("&e&l互通余额"));
+                h.inv = inv;
+                fillGlass(inv);
+                double local = plugin.toLocal(wallet);
+                List<String> mid = new ArrayList<>();
+                mid.add("&7互通余额 &f" + ESLinkPlugin.stripZeros(wallet));
+                mid.add("&7约合本服 &a" + plugin.money(local));
+                mid.add("&7本服汇率 &f" + plugin.linkRateText());
+                mid.add("&7本服余额 &f" + plugin.money(plugin.vault().bal(p)));
+                mid.add("&8存入、取出都按本服汇率");
+                if (plugin.claimCodeEnabled()) {
+                    mid.add("&e取出需钱包码（首次存入时显示）");
+                    if (st.walletUnlocked) mid.add("&a本会话已验证钱包码");
+                }
+                mid.add("&8例：本服 10，汇率 1:1.5 → 互通 15");
+                inv.setItem(13, Items.named(Material.GOLD_INGOT, "&e互通余额 &f" + ESLinkPlugin.stripZeros(wallet), mid));
+                if (!plugin.walletEnabled()) {
+                    inv.setItem(11, tag("home", "", 0, Items.named(Material.BARRIER, "&c本服未开放互通钱包",
+                            List.of("&8管理可在互通设置中打开"))));
+                    inv.setItem(15, pane());
+                } else {
+                    inv.setItem(11, tag("wallet-in", "", 0, Items.named(Material.LIME_CONCRETE, "&a存入",
+                            List.of("&7从本服扣款，换成互通余额",
+                                    "&7到另一台服再取出",
+                                    "&8聊天栏输入本服金额，或输入 全部"))));
+                    inv.setItem(15, tag("wallet-out", "", 0, Items.named(Material.YELLOW_CONCRETE, "&e取出",
+                            List.of("&7按本服汇率把互通余额兑回本服",
+                                    plugin.claimCodeEnabled() ? "&e需首次存入时的 6 位钱包码" : "&8聊天栏输入要取的本服金额",
+                                    "&8或输入 全部 / 点击右侧全部取出"))));
+                    inv.setItem(16, tag("wallet-out-all", "", 0, Items.named(Material.HOPPER, "&e全部取出",
+                            List.of("&7兑回约 &a" + plugin.money(local),
+                                    "&8按当前汇率一次性取出"))));
+                }
+                inv.setItem(22, tag("home", "", 0, Items.named(Material.OAK_DOOR, "&7返回大厅", null)));
+                p.openInventory(inv);
+            });
+        });
+    }
+
+    public void beginWallet(Player p, boolean out) {
+        if (!plugin.walletEnabled()) {
+            plugin.msg(p, "本服未开放互通钱包。");
+            return;
+        }
+        if (!plugin.store().ready() || !plugin.vault().ok()) {
+            plugin.msg(p, "本服经济或数据库不可用。");
+            return;
+        }
+        Sessions.State st = plugin.sessions().of(p);
+        if (out && plugin.claimCodeEnabled() && !st.walletUnlocked) {
+            async(() -> {
+                boolean has;
+                try {
+                    has = plugin.store().walletHasClaim(p.getUniqueId());
+                } catch (Exception e) {
+                    sync(() -> plugin.msg(p, "无法读取钱包。"));
+                    return;
+                }
+                sync(() -> {
+                    if (!has) {
+                        plugin.msg(p, "还没有钱包码。请先存入任意金额，聊天会显示 6 位钱包码，请记下后再取出。");
+                        openWallet(p);
+                        return;
+                    }
+                    beginWalletPin(p);
+                });
+            });
+            return;
+        }
+        st.awaitingWallet = true;
+        st.walletOut = out;
+        st.awaitingPrice = false;
+        st.awaitingSearch = false;
+        st.awaitingPair = false;
+        st.awaitingClaim = false;
+        st.awaitingWalletPin = false;
+        p.closeInventory();
+        if (out) {
+            plugin.msg(p, "请输入要取出的本服金额。汇率 " + plugin.linkRateText()
+                    + "。全部 / all 取出剩余互通余额。cancel 取消。");
+        } else {
+            plugin.msg(p, "请输入要存入的本服金额。汇率 " + plugin.linkRateText()
+                    + "。全部 / all 存入当前余额。cancel 取消。");
+        }
+    }
+
+    public void beginWalletPin(Player p) {
+        String lock = plugin.claimLocked(p);
+        if (lock != null) {
+            plugin.msg(p, lock);
+            return;
+        }
+        Sessions.State st = plugin.sessions().of(p);
+        st.awaitingWalletPin = true;
+        st.awaitingWallet = false;
+        st.awaitingClaim = false;
+        st.awaitingPrice = false;
+        p.closeInventory();
+        plugin.msg(p, "请输入首次存入时显示的 6 位钱包码。cancel 取消。");
+    }
+
+    public void finishWalletPin(Player p, String raw) {
+        Sessions.State st = plugin.sessions().of(p);
+        st.awaitingWalletPin = false;
+        String lock = plugin.claimLocked(p);
+        if (lock != null) {
+            plugin.msg(p, lock);
+            return;
+        }
+        if (!ClaimCodes.plausible(raw)) {
+            plugin.claimFail(p);
+            plugin.msg(p, "钱包码应为 6 位数字。");
+            return;
+        }
+        async(() -> {
+            boolean ok;
+            try {
+                ok = plugin.store().walletClaimOk(p.getUniqueId(), raw);
+            } catch (Exception e) {
+                sync(() -> plugin.msg(p, "校验失败。"));
+                return;
+            }
+            sync(() -> {
+                if (!ok) {
+                    plugin.claimFail(p);
+                    plugin.msg(p, "钱包码不正确。");
+                    return;
+                }
+                plugin.claimOk(p);
+                st.walletUnlocked = true;
+                plugin.msg(p, "钱包码已验证。本会话内可以取出。");
+                openWallet(p);
+            });
+        });
+    }
+
+    public void finishWallet(Player p, double local) {
+        Sessions.State st = plugin.sessions().of(p);
+        boolean out = st.walletOut;
+        st.awaitingWallet = false;
+        if (local <= 0) {
+            plugin.msg(p, "金额无效。");
+            openWallet(p);
+            return;
+        }
+        local = ESLinkPlugin.roundMoney(local);
+        double link = plugin.toLink(local);
+        if (link <= 0) {
+            plugin.msg(p, "按当前汇率换算后不足一笔，请加大金额。");
+            openWallet(p);
+            return;
+        }
+        if (out) {
+            if (plugin.claimCodeEnabled() && !st.walletUnlocked) {
+                beginWallet(p, true);
+                return;
+            }
+            walletOut(p, local, link);
+        }
+        else walletIn(p, local, link);
+    }
+
+    public void finishWalletAll(Player p) {
+        Sessions.State st = plugin.sessions().of(p);
+        boolean out = st.walletOut;
+        st.awaitingWallet = false;
+        if (out) {
+            walletOutAll(p);
+            return;
+        }
+        double bal = plugin.vault().ok() ? ESLinkPlugin.roundMoney(plugin.vault().bal(p)) : 0;
+        if (bal <= 0) {
+            plugin.msg(p, "本服余额不足。");
+            openWallet(p);
+            return;
+        }
+        finishWallet(p, bal);
+    }
+
+    private void walletIn(Player p, double local, double link) {
+        String err = plugin.vault().withdraw(p, local);
+        if (err != null) {
+            plugin.msg(p, err);
+            openWallet(p);
+            return;
+        }
+        async(() -> {
+            try {
+                String code = plugin.store().walletCredit(p.getUniqueId(), p.getName(), link, plugin.claimCodeEnabled());
+                sync(() -> {
+                    plugin.msg(p, "已存入本服 " + plugin.money(local)
+                            + "（互通 " + ESLinkPlugin.stripZeros(link) + "）。到另一台服打开互通余额即可取出。");
+                    if (code != null && !code.isBlank()) {
+                        plugin.msg(p, "&e钱包码 &f" + code + " &7请记下。取出时必须输入此码。不要发给别人。");
+                    }
+                    openWallet(p);
+                });
+            } catch (Exception e) {
+                sync(() -> {
+                    plugin.vault().deposit(p, local);
+                    plugin.msg(p, "存入失败，本服金额已退回。");
+                    openWallet(p);
+                });
+            }
+        });
+    }
+
+    private void walletOut(Player p, double local, double link) {
+        async(() -> {
+            double got;
+            try {
+                got = plugin.store().walletDebit(p.getUniqueId(), link);
+            } catch (Exception e) {
+                sync(() -> {
+                    plugin.msg(p, "取出失败。");
+                    openWallet(p);
+                });
+                return;
+            }
+            if (got <= 0) {
+                sync(() -> {
+                    plugin.msg(p, "互通余额不足。取出 " + plugin.money(local)
+                            + " 需要互通 " + ESLinkPlugin.stripZeros(link) + "。");
+                    openWallet(p);
+                });
+                return;
+            }
+            double pay = plugin.toLocal(got);
+            sync(() -> {
+                plugin.vault().deposit(p, pay);
+                plugin.msg(p, "已取出本服 " + plugin.money(pay)
+                        + "（互通 " + ESLinkPlugin.stripZeros(got) + "）。");
+                openWallet(p);
+            });
+        });
+    }
+
+    public void walletOutAll(Player p) {
+        if (!plugin.walletEnabled()) {
+            plugin.msg(p, "本服未开放互通钱包。");
+            return;
+        }
+        if (!plugin.store().ready() || !plugin.vault().ok()) {
+            plugin.msg(p, "本服经济或数据库不可用。");
+            return;
+        }
+        if (plugin.claimCodeEnabled() && !plugin.sessions().of(p).walletUnlocked) {
+            beginWallet(p, true);
+            return;
+        }
+        plugin.sessions().of(p).awaitingWallet = false;
+        async(() -> {
+            double got;
+            try {
+                got = plugin.store().walletTakeAll(p.getUniqueId());
+            } catch (Exception e) {
+                sync(() -> {
+                    plugin.msg(p, "取出失败。");
+                    openWallet(p);
+                });
+                return;
+            }
+            if (got <= 0) {
+                sync(() -> {
+                    plugin.msg(p, "没有可取的互通余额。");
+                    openWallet(p);
+                });
+                return;
+            }
+            double pay = plugin.toLocal(got);
+            sync(() -> {
+                plugin.vault().deposit(p, pay);
+                plugin.msg(p, "已全部取出：本服 " + plugin.money(pay)
+                        + "（互通 " + ESLinkPlugin.stripZeros(got) + "）。");
+                openWallet(p);
+            });
         });
     }
 
@@ -1308,6 +1933,10 @@ public final class LinkGui {
                 plugin.alertChestAdmin() ? Material.LIME_DYE : Material.GRAY_DYE,
                 plugin.alertChestAdmin() ? "&a运输箱通知: 开" : "&7运输箱通知: 关",
                 List.of("&7有人创建运输箱时通知本服管理", "&8点击开关"))));
+        inv.setItem(13, tag("wallet-tog", "", 0, Items.named(
+                plugin.walletEnabled() ? Material.LIME_CONCRETE : Material.RED_CONCRETE,
+                plugin.walletEnabled() ? "&a互通钱包: 开" : "&c互通钱包: 关",
+                List.of("&7玩家可把本服货币存成互通余额", "&7到另一台服按当地汇率取出"))));
         inv.setItem(14, tag("trade-tog", "", 0, Items.named(
                 plugin.tradeEnabled() ? Material.LIME_CONCRETE : Material.RED_CONCRETE,
                 plugin.tradeEnabled() ? "&a互通交易: 开" : "&c互通交易: 关",
@@ -1318,6 +1947,19 @@ public final class LinkGui {
                 List.of("&7买家多付，卖家仍收标价", "&7税进本服配置的 sink 账户")));
         inv.setItem(17, tag("tax-up", "", 0, Items.named(Material.LIME_CONCRETE, "&a税率 +1%",
                 List.of("&7当前 &f" + plugin.taxRateText()))));
+        inv.setItem(21, tag("rate-down", "", 0, Items.named(Material.RED_CONCRETE, "&c汇率 -0.1",
+                List.of("&7当前 &f" + plugin.linkRateText(), "&8潜行点击 ±0.01"))));
+        inv.setItem(22, Items.named(Material.SUNFLOWER, "&e互通汇率 &f" + plugin.linkRateText(),
+                List.of("&7含义：1 本服货币 = " + ESLinkPlugin.stripZeros(plugin.linkRate()) + " 互通",
+                        "&7上架输入本服价格，货单按互通记账",
+                        "&7外服玩家看到的是他们本服换算后的实付（含税）",
+                        "&8例：1:1.5 表示本服 10 = 互通 15")));
+        inv.setItem(23, tag("rate-up", "", 0, Items.named(Material.LIME_CONCRETE, "&a汇率 +0.1",
+                List.of("&7当前 &f" + plugin.linkRateText(), "&8潜行点击 ±0.01"))));
+        inv.setItem(24, tag("claim-tog", "", 0, Items.named(
+                plugin.claimCodeEnabled() ? Material.LIME_CONCRETE : Material.RED_CONCRETE,
+                plugin.claimCodeEnabled() ? "&a取件码: 开" : "&c取件码: 关",
+                List.of("&7离线服必须开", "&7码全服唯一，上架服可再看", "&7可发给别人代领", "&7猜错码 5 次或点错货主会暂停取件"))));
         boolean concrete = plugin.serverIcon().contains("CONCRETE");
         inv.setItem(28, tag("colors", "", 0, Items.named(
                 Items.serverMat(plugin.serverColor(), plugin.serverIcon()),
@@ -1502,19 +2144,52 @@ public final class LinkGui {
         if (!blurb.isEmpty()) lore.add("&7" + blurb);
         lore.add(on ? "&a在线" : "&8离线");
         if (s.code() != null && s.code().equalsIgnoreCase(plugin.serverCode())) lore.add("&f本服");
+        double rate = s.linkRate() > 0 ? s.linkRate() : 1;
+        lore.add("&7汇率 &f1:" + ESLinkPlugin.stripZeros(rate));
         if (clickHint != null) lore.add("&8" + clickHint);
+        return lore;
+    }
+
+    /** 货单价格按互通记账；展示本服换算（含税）。 */
+    private List<String> priceLore(Models.Listing L) {
+        double link = L.price();
+        double local = plugin.toLocal(link);
+        double tax = plugin.taxOf(local);
+        List<String> lore = new ArrayList<>();
+        lore.add("&7互通 &f" + ESLinkPlugin.stripZeros(link));
+        lore.add("&7本服 &a" + plugin.money(local));
+        if (tax > 0) {
+            lore.add("&7税 &e" + plugin.money(tax) + " &8(" + plugin.taxRateText() + ")");
+            lore.add("&7实付 &c" + plugin.money(local + tax));
+        }
+        lore.add("&8本服汇率 " + plugin.linkRateText());
+        String origin = L.serverCode();
+        if (origin != null && !origin.equalsIgnoreCase(plugin.serverCode())) {
+            Models.ServerRow s = null;
+            for (Models.ServerRow row : plugin.cachedServers()) {
+                if (row.code() != null && row.code().equalsIgnoreCase(origin)) {
+                    s = row;
+                    break;
+                }
+            }
+            if (s != null && s.linkRate() > 0) {
+                lore.add("&8来源服汇率 " + plugin.linkRateTextOf(origin));
+            }
+        }
         return lore;
     }
 
     private String buyHint(Models.Listing L, Player p) {
         if (plugin.selfListing(L, p)) {
             if (plugin.localListing(L)) return "&8本服货请到「我的上架」下架";
-            return "&8左键跨服取回  右键查看卖家";
+            return plugin.claimCodeEnabled()
+                    ? "&8请用大厅「取件」输入取件码（可代领）"
+                    : "&8左键跨服取回  右键查看卖家";
         }
         return "&8左键购买  右键查看卖家";
     }
 
-    private ItemStack listingIcon(Models.Listing L, String hint) {
+    private ItemStack listingIcon(Models.Listing L, String hint, Player viewer) {
         ItemStack icon = ItemCodec.icon(L.blob(), L.itemKey(), L.itemName(), L.amount(), L.nestedKeys());
         var meta = icon.getItemMeta();
         List<String> lore = new ArrayList<>();
@@ -1522,8 +2197,12 @@ public final class LinkGui {
         lore.add(ColorUtil.colorize("&8——"));
         lore.add(ColorUtil.colorize("&7卖家 &f" + L.sellerName()));
         lore.add(ColorUtil.colorize("&7来自 &f" + plugin.prettyName(L.serverCode())));
-        String price = plugin.vault().ok() ? plugin.vault().format(L.price()) : String.valueOf(L.price());
-        lore.add(ColorUtil.colorize("&7价格 &a" + price));
+        if (viewer != null && plugin.claimCodeEnabled()
+                && plugin.selfListing(L, viewer) && plugin.localListing(L) && L.hasClaim()) {
+            lore.add(ColorUtil.colorize("&e取件码 &f" + L.claimCode()));
+            lore.add(ColorUtil.colorize("&8可发给别人代领"));
+        }
+        for (String line : priceLore(L)) lore.add(ColorUtil.colorize(line));
         if (hint != null && !hint.isBlank()) lore.add(ColorUtil.colorize(hint));
         if (meta != null) {
             meta.setLore(lore);

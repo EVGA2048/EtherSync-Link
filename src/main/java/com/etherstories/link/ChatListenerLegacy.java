@@ -18,7 +18,8 @@ public final class ChatListenerLegacy implements Listener {
     public void onChat(AsyncPlayerChatEvent e) {
         Player p = e.getPlayer();
         Sessions.State st = plugin.sessions().of(p);
-        if (!st.awaitingSearch && !st.awaitingPrice && !st.awaitingPair) return;
+        if (!st.awaitingSearch && !st.awaitingPrice && !st.awaitingPair
+                && !st.awaitingWallet && !st.awaitingClaim && !st.awaitingWalletPin) return;
         String msg = ChatTap.text(p, e.getMessage() == null ? "" : e.getMessage()).trim();
         e.setCancelled(true);
         e.setMessage("");
@@ -64,10 +65,20 @@ public final class ChatListenerLegacy implements Listener {
             st.awaitingSearch = false;
             st.awaitingPrice = false;
             st.awaitingPair = false;
+            boolean wallet = st.awaitingWallet || st.awaitingWalletPin;
+            boolean claim = st.awaitingClaim;
+            st.awaitingWallet = false;
+            st.awaitingWalletPin = false;
+            st.awaitingClaim = false;
+            st.claimListingId = 0;
             st.repriceId = 0;
             st.listItem = null;
             plugin.msg(p, "已取消。");
-            if (plugin.gui() != null) plugin.gui().openHome(p);
+            if (plugin.gui() != null) {
+                if (wallet) plugin.gui().openWallet(p);
+                else if (claim) plugin.gui().openMarket(p);
+                else plugin.gui().openHome(p);
+            }
             return;
         }
         if (st.awaitingPair) {
@@ -80,6 +91,26 @@ public final class ChatListenerLegacy implements Listener {
             st.query = msg;
             st.marketPage = 0;
             if (plugin.gui() != null) plugin.gui().openMarket(p);
+            return;
+        }
+        if (st.awaitingWalletPin) {
+            if (plugin.gui() != null) plugin.gui().finishWalletPin(p, msg);
+            return;
+        }
+        if (st.awaitingClaim) {
+            if (plugin.gui() != null) plugin.gui().finishClaim(p, msg);
+            return;
+        }
+        if (st.awaitingWallet) {
+            if (ESLinkPlugin.isAllAmount(msg)) {
+                if (plugin.gui() != null) plugin.gui().finishWalletAll(p);
+                return;
+            }
+            try {
+                if (plugin.gui() != null) plugin.gui().finishWallet(p, Double.parseDouble(msg.replace(',', '.')));
+            } catch (NumberFormatException ex) {
+                plugin.msg(p, "请输入数字金额，或输入 cancel 取消。");
+            }
             return;
         }
         if (st.awaitingPrice) {

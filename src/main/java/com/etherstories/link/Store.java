@@ -73,6 +73,15 @@ public final class Store {
             try { s.executeUpdate("ALTER TABLE link_servers ADD COLUMN color VARCHAR(16) NOT NULL DEFAULT 'LIGHT_BLUE'"); } catch (Exception ignored) {}
             try { s.executeUpdate("ALTER TABLE link_servers ADD COLUMN icon VARCHAR(16) NOT NULL DEFAULT 'TERRACOTTA'"); } catch (Exception ignored) {}
             try { s.executeUpdate("ALTER TABLE link_servers ADD COLUMN short_name VARCHAR(16) NOT NULL DEFAULT ''"); } catch (Exception ignored) {}
+            try { s.executeUpdate("ALTER TABLE link_servers ADD COLUMN link_rate DOUBLE NOT NULL DEFAULT 1"); } catch (Exception ignored) {}
+            s.executeUpdate("""
+                    CREATE TABLE IF NOT EXISTS link_wallets (
+                      uuid CHAR(36) PRIMARY KEY,
+                      name VARCHAR(32) NOT NULL,
+                      balance DOUBLE NOT NULL DEFAULT 0,
+                      updated BIGINT NOT NULL
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                    """);
             s.executeUpdate("""
                     CREATE TABLE IF NOT EXISTS link_listings (
                       id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -212,6 +221,25 @@ public final class Store {
             try { s.executeUpdate("ALTER TABLE link_chests ADD COLUMN bounce_id INT NOT NULL DEFAULT 0"); } catch (Exception ignored) {}
             try { s.executeUpdate("ALTER TABLE link_chests ADD COLUMN sign_face VARCHAR(16) NULL"); } catch (Exception ignored) {}
             try { s.executeUpdate("ALTER TABLE link_listings ADD COLUMN nested_keys TEXT NULL"); } catch (Exception ignored) {}
+            try { s.executeUpdate("ALTER TABLE link_listings ADD COLUMN claim_hash CHAR(64) NOT NULL DEFAULT ''"); } catch (Exception ignored) {}
+            try { s.executeUpdate("ALTER TABLE link_listings ADD COLUMN claim_code CHAR(6) NULL"); } catch (Exception ignored) {}
+            try { s.executeUpdate("ALTER TABLE link_listings ADD UNIQUE KEY uk_claim_code (claim_code)"); }
+            catch (Exception e) {
+                String m = e.getMessage() == null ? "" : e.getMessage().toLowerCase();
+                if (!m.contains("duplicate") && !m.contains("exists")) {
+                    plugin.getLogger().warning("uk_claim_code: " + e.getMessage());
+                }
+            }
+            try { s.executeUpdate("ALTER TABLE link_wallets ADD COLUMN claim_hash CHAR(64) NOT NULL DEFAULT ''"); } catch (Exception ignored) {}
+            s.executeUpdate("""
+                    CREATE TABLE IF NOT EXISTS link_seen (
+                      server_code VARCHAR(16) NOT NULL,
+                      uuid CHAR(36) NOT NULL,
+                      name VARCHAR(32) NOT NULL,
+                      last_seen BIGINT NOT NULL,
+                      PRIMARY KEY (server_code, uuid)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                    """);
             s.executeUpdate("""
                     CREATE TABLE IF NOT EXISTS link_watch (
                       player_uuid CHAR(36) NOT NULL,
@@ -258,14 +286,15 @@ public final class Store {
         }
     }
 
-    public void heartbeat(String code, String name, String shortName, String blurb, String color, String icon) throws Exception {
+    public void heartbeat(String code, String name, String shortName, String blurb, String color, String icon, double linkRate) throws Exception {
         try (Connection c = ds.getConnection();
              PreparedStatement ps = c.prepareStatement("""
-                     INSERT INTO link_servers (code, display_name, short_name, blurb, color, icon, last_heartbeat)
-                     VALUES (?,?,?,?,?,?, FLOOR(UNIX_TIMESTAMP(NOW(3))*1000))
+                     INSERT INTO link_servers (code, display_name, short_name, blurb, color, icon, link_rate, last_heartbeat)
+                     VALUES (?,?,?,?,?,?,?, FLOOR(UNIX_TIMESTAMP(NOW(3))*1000))
                      ON DUPLICATE KEY UPDATE display_name=VALUES(display_name),
                      short_name=VALUES(short_name),
                      blurb=VALUES(blurb), color=VALUES(color), icon=VALUES(icon),
+                     link_rate=VALUES(link_rate),
                      last_heartbeat=FLOOR(UNIX_TIMESTAMP(NOW(3))*1000)
                      """)) {
             ps.setString(1, code);
@@ -274,6 +303,7 @@ public final class Store {
             ps.setString(4, blurb == null ? "" : blurb);
             ps.setString(5, color == null || color.isBlank() ? "LIGHT_BLUE" : color);
             ps.setString(6, icon == null || icon.isBlank() ? "TERRACOTTA" : icon);
+            ps.setDouble(7, linkRate <= 0 ? 1 : linkRate);
             ps.executeUpdate();
         }
     }
@@ -282,16 +312,220 @@ public final class Store {
         List<Models.ServerRow> out = new ArrayList<>();
         try (Connection c = ds.getConnection();
              PreparedStatement ps = c.prepareStatement(
-                     "SELECT code, display_name, short_name, blurb, color, icon, last_heartbeat, FLOOR(UNIX_TIMESTAMP(NOW(3))*1000) AS db_now FROM link_servers")) {
+                     "SELECT code, display_name, short_name, blurb, color, icon, link_rate, last_heartbeat, FLOOR(UNIX_TIMESTAMP(NOW(3))*1000) AS db_now FROM link_servers")) {
             ResultSet rs = ps.executeQuery();
             while (rs.next()) {
+                double rate = 1;
+                try { rate = rs.getDouble("link_rate"); } catch (Exception ignored) {}
+                if (rate <= 0) rate = 1;
                 out.add(new Models.ServerRow(
                         rs.getString("code"), rs.getString("display_name"),
                         nz(rs, "short_name"), nz(rs, "blurb"), nz(rs, "color"), nz(rs, "icon"),
+                        rate,
                         rs.getLong("last_heartbeat"), rs.getLong("db_now")));
             }
         }
         return out;
+    }
+
+    public double walletOf(UUID uuid) throws Exception {
+        if (uuid == null) return 0;
+        try (Connection c = ds.getConnection();
+             PreparedStatement ps = c.prepareStatement("SELECT balance FROM link_wallets WHERE uuid=?")) {
+            ps.setString(1, uuid.toString());
+            ResultSet rs = ps.executeQuery();
+            if (!rs.next()) return 0;
+            double b = rs.getDouble(1);
+            return b <= 0 ? 0 : ESLinkPlugin.roundMoney(b);
+        }
+    }
+
+    public boolean walletHasClaim(UUID uuid) throws Exception {
+        if (uuid == null) return false;
+        try (Connection c = ds.getConnection();
+             PreparedStatement ps = c.prepareStatement("SELECT claim_hash FROM link_wallets WHERE uuid=?")) {
+            ps.setString(1, uuid.toString());
+            ResultSet rs = ps.executeQuery();
+            if (!rs.next()) return false;
+            String h = rs.getString(1);
+            return h != null && !h.isBlank();
+        }
+    }
+
+    public boolean walletClaimOk(UUID uuid, String code) throws Exception {
+        if (uuid == null) return false;
+        try (Connection c = ds.getConnection();
+             PreparedStatement ps = c.prepareStatement("SELECT claim_hash FROM link_wallets WHERE uuid=?")) {
+            ps.setString(1, uuid.toString());
+            ResultSet rs = ps.executeQuery();
+            if (!rs.next()) return false;
+            return ClaimCodes.walletOk(uuid, code, rs.getString(1));
+        }
+    }
+
+    public void walletClearClaim(UUID uuid) throws Exception {
+        if (uuid == null) return;
+        try (Connection c = ds.getConnection();
+             PreparedStatement ps = c.prepareStatement(
+                     "UPDATE link_wallets SET claim_hash='', updated=? WHERE uuid=?")) {
+            ps.setLong(1, System.currentTimeMillis());
+            ps.setString(2, uuid.toString());
+            ps.executeUpdate();
+        }
+    }
+
+    /** @return 新建或补绑钱包码时的明文；否则 null */
+    public String walletCredit(UUID uuid, String name, double link, boolean bindCode) throws Exception {
+        if (uuid == null || link <= 0) return null;
+        String nm = name == null ? "" : (name.length() > 32 ? name.substring(0, 32) : name);
+        double add = ESLinkPlugin.roundMoney(link);
+        long now = System.currentTimeMillis();
+        try (Connection c = ds.getConnection()) {
+            c.setAutoCommit(false);
+            try {
+                boolean exists = false;
+                String hash = "";
+                try (PreparedStatement sel = c.prepareStatement(
+                        "SELECT claim_hash FROM link_wallets WHERE uuid=? FOR UPDATE")) {
+                    sel.setString(1, uuid.toString());
+                    ResultSet rs = sel.executeQuery();
+                    if (rs.next()) {
+                        exists = true;
+                        String h = rs.getString(1);
+                        hash = h == null ? "" : h;
+                    }
+                }
+                String shown = null;
+                if (!exists) {
+                    if (bindCode) {
+                        shown = ClaimCodes.generate();
+                        hash = ClaimCodes.walletHash(uuid, shown);
+                    }
+                    try (PreparedStatement ins = c.prepareStatement("""
+                            INSERT INTO link_wallets (uuid, name, balance, updated, claim_hash)
+                            VALUES (?,?,?,?,?)
+                            """)) {
+                        ins.setString(1, uuid.toString());
+                        ins.setString(2, nm);
+                        ins.setDouble(3, add);
+                        ins.setLong(4, now);
+                        ins.setString(5, hash);
+                        ins.executeUpdate();
+                    }
+                } else {
+                    if (bindCode && hash.isBlank()) {
+                        shown = ClaimCodes.generate();
+                        hash = ClaimCodes.walletHash(uuid, shown);
+                        try (PreparedStatement upd = c.prepareStatement(
+                                "UPDATE link_wallets SET name=?, balance=balance+?, updated=?, claim_hash=? WHERE uuid=?")) {
+                            upd.setString(1, nm);
+                            upd.setDouble(2, add);
+                            upd.setLong(3, now);
+                            upd.setString(4, hash);
+                            upd.setString(5, uuid.toString());
+                            upd.executeUpdate();
+                        }
+                    } else {
+                        try (PreparedStatement upd = c.prepareStatement(
+                                "UPDATE link_wallets SET name=?, balance=balance+?, updated=? WHERE uuid=?")) {
+                            upd.setString(1, nm);
+                            upd.setDouble(2, add);
+                            upd.setLong(3, now);
+                            upd.setString(4, uuid.toString());
+                            upd.executeUpdate();
+                        }
+                    }
+                }
+                c.commit();
+                return shown;
+            } catch (Exception e) {
+                c.rollback();
+                throw e;
+            } finally {
+                c.setAutoCommit(true);
+            }
+        }
+    }
+
+    /** 扣互通余额。不足则 0，不改库。 */
+    public double walletDebit(UUID uuid, double link) throws Exception {
+        if (uuid == null || link <= 0) return 0;
+        double need = ESLinkPlugin.roundMoney(link);
+        try (Connection c = ds.getConnection()) {
+            c.setAutoCommit(false);
+            try {
+                double bal = 0;
+                try (PreparedStatement sel = c.prepareStatement(
+                        "SELECT balance FROM link_wallets WHERE uuid=? FOR UPDATE")) {
+                    sel.setString(1, uuid.toString());
+                    ResultSet rs = sel.executeQuery();
+                    if (!rs.next()) {
+                        c.rollback();
+                        return 0;
+                    }
+                    bal = rs.getDouble(1);
+                }
+                if (bal + 0.0001 < need) {
+                    c.rollback();
+                    return 0;
+                }
+                double next = ESLinkPlugin.roundMoney(bal - need);
+                if (next < 0) next = 0;
+                try (PreparedStatement upd = c.prepareStatement(
+                        "UPDATE link_wallets SET balance=?, updated=? WHERE uuid=?")) {
+                    upd.setDouble(1, next);
+                    upd.setLong(2, System.currentTimeMillis());
+                    upd.setString(3, uuid.toString());
+                    upd.executeUpdate();
+                }
+                c.commit();
+                return need;
+            } catch (Exception e) {
+                c.rollback();
+                throw e;
+            } finally {
+                c.setAutoCommit(true);
+            }
+        }
+    }
+
+    /** 取出全部互通余额。 */
+    public double walletTakeAll(UUID uuid) throws Exception {
+        if (uuid == null) return 0;
+        try (Connection c = ds.getConnection()) {
+            c.setAutoCommit(false);
+            try {
+                double bal = 0;
+                try (PreparedStatement sel = c.prepareStatement(
+                        "SELECT balance FROM link_wallets WHERE uuid=? FOR UPDATE")) {
+                    sel.setString(1, uuid.toString());
+                    ResultSet rs = sel.executeQuery();
+                    if (!rs.next()) {
+                        c.rollback();
+                        return 0;
+                    }
+                    bal = rs.getDouble(1);
+                }
+                bal = ESLinkPlugin.roundMoney(bal);
+                if (bal <= 0) {
+                    c.rollback();
+                    return 0;
+                }
+                try (PreparedStatement upd = c.prepareStatement(
+                        "UPDATE link_wallets SET balance=0, updated=? WHERE uuid=?")) {
+                    upd.setLong(1, System.currentTimeMillis());
+                    upd.setString(2, uuid.toString());
+                    upd.executeUpdate();
+                }
+                c.commit();
+                return bal;
+            } catch (Exception e) {
+                c.rollback();
+                throw e;
+            } finally {
+                c.setAutoCommit(true);
+            }
+        }
     }
 
     public record RegistryRow(String code, String digest, int count, byte[] payload) {}
@@ -402,11 +636,12 @@ public final class Store {
 
     public long insertListing(UUID seller, String sellerName, String server,
                               String itemKey, String itemName, int amount, double price, String b64,
-                              String nestedKeys) throws Exception {
+                              String nestedKeys, String claimCode) throws Exception {
+        String code = claimCode == null || claimCode.isBlank() ? null : ClaimCodes.normalize(claimCode);
         try (Connection c = ds.getConnection();
              PreparedStatement ps = c.prepareStatement("""
-                     INSERT INTO link_listings (seller_uuid,seller_name,server_code,item_key,item_name,amount,price,created,blob_b64,nested_keys)
-                     VALUES (?,?,?,?,?,?,?,?,?,?)
+                     INSERT INTO link_listings (seller_uuid,seller_name,server_code,item_key,item_name,amount,price,created,blob_b64,nested_keys,claim_code)
+                     VALUES (?,?,?,?,?,?,?,?,?,?,?)
                      """, Statement.RETURN_GENERATED_KEYS)) {
             ps.setString(1, seller.toString());
             ps.setString(2, sellerName);
@@ -418,6 +653,8 @@ public final class Store {
             ps.setLong(8, System.currentTimeMillis());
             ps.setString(9, b64);
             ps.setString(10, nestedKeys);
+            if (code == null) ps.setNull(11, java.sql.Types.CHAR);
+            else ps.setString(11, code);
             ps.executeUpdate();
             ResultSet keys = ps.getGeneratedKeys();
             return keys.next() ? keys.getLong(1) : 0;
@@ -426,7 +663,7 @@ public final class Store {
 
     public List<Models.Listing> listings(String serverFilter, String query, UUID sellerOnly, int offset, int limit) throws Exception {
         StringBuilder sql = new StringBuilder("""
-                SELECT id,seller_uuid,seller_name,server_code,item_key,item_name,amount,price,created,blob_b64,nested_keys
+                SELECT id,seller_uuid,seller_name,server_code,item_key,item_name,amount,price,created,blob_b64,nested_keys,claim_code
                 FROM link_listings WHERE 1=1
                 """);
         List<Object> args = new ArrayList<>();
@@ -466,12 +703,87 @@ public final class Store {
     public Models.Listing listing(long id) throws Exception {
         try (Connection c = ds.getConnection();
              PreparedStatement ps = c.prepareStatement("""
-                     SELECT id,seller_uuid,seller_name,server_code,item_key,item_name,amount,price,created,blob_b64,nested_keys
+                     SELECT id,seller_uuid,seller_name,server_code,item_key,item_name,amount,price,created,blob_b64,nested_keys,claim_code
                      FROM link_listings WHERE id=?
                      """)) {
             ps.setLong(1, id);
             ResultSet rs = ps.executeQuery();
             return rs.next() ? readListing(rs) : null;
+        }
+    }
+
+    public boolean claimCodeTaken(String code) throws Exception {
+        String c = ClaimCodes.normalize(code);
+        if (c.isEmpty()) return false;
+        try (Connection conn = ds.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT 1 FROM link_listings WHERE claim_code=? LIMIT 1")) {
+            ps.setString(1, c);
+            return ps.executeQuery().next();
+        }
+    }
+
+    public Models.Listing listingByClaim(String code) throws Exception {
+        String c = ClaimCodes.normalize(code);
+        if (c.isEmpty()) return null;
+        try (Connection conn = ds.getConnection();
+             PreparedStatement ps = conn.prepareStatement("""
+                     SELECT id,seller_uuid,seller_name,server_code,item_key,item_name,amount,price,created,blob_b64,nested_keys,claim_code
+                     FROM link_listings WHERE claim_code=?
+                     """)) {
+            ps.setString(1, c);
+            ResultSet rs = ps.executeQuery();
+            return rs.next() ? readListing(rs) : null;
+        }
+    }
+
+    public void touchSeen(String server, UUID uuid, String name) throws Exception {
+        if (server == null || uuid == null) return;
+        String nm = name == null ? "" : (name.length() > 32 ? name.substring(0, 32) : name);
+        try (Connection c = ds.getConnection();
+             PreparedStatement ps = c.prepareStatement("""
+                     INSERT INTO link_seen (server_code, uuid, name, last_seen)
+                     VALUES (?,?,?,?)
+                     ON DUPLICATE KEY UPDATE name=VALUES(name), last_seen=VALUES(last_seen)
+                     """)) {
+            ps.setString(1, server);
+            ps.setString(2, uuid.toString());
+            ps.setString(3, nm);
+            ps.setLong(4, System.currentTimeMillis());
+            ps.executeUpdate();
+        }
+    }
+
+    public record Seen(UUID uuid, String name) {}
+
+    public List<Seen> seenOthers(String server, UUID exclude, int limit) throws Exception {
+        List<Seen> out = new ArrayList<>();
+        try (Connection c = ds.getConnection();
+             PreparedStatement ps = c.prepareStatement("""
+                     SELECT uuid, name FROM link_seen
+                     WHERE server_code=? AND uuid<>?
+                     ORDER BY last_seen DESC LIMIT ?
+                     """)) {
+            ps.setString(1, server);
+            ps.setString(2, exclude == null ? "" : exclude.toString());
+            ps.setInt(3, Math.max(1, Math.min(limit, 40)));
+            ResultSet rs = ps.executeQuery();
+            while (rs.next()) {
+                try {
+                    out.add(new Seen(UUID.fromString(rs.getString(1)), nz(rs, "name")));
+                } catch (Exception ignored) {}
+            }
+        }
+        return out;
+    }
+
+    public boolean listingClaimOk(long id, String code) throws Exception {
+        try (Connection c = ds.getConnection();
+             PreparedStatement ps = c.prepareStatement("SELECT claim_hash FROM link_listings WHERE id=?")) {
+            ps.setLong(1, id);
+            ResultSet rs = ps.executeQuery();
+            if (!rs.next()) return false;
+            return ClaimCodes.listingOk(code, rs.getString(1));
         }
     }
 
@@ -496,6 +808,8 @@ public final class Store {
     private static Models.Listing readListing(ResultSet rs) throws Exception {
         String b64 = rs.getString("blob_b64");
         byte[] blob = (b64 == null || b64.isBlank()) ? null : java.util.Base64.getDecoder().decode(b64);
+        String nested = nz(rs, "nested_keys");
+        String code = nz(rs, "claim_code");
         return new Models.Listing(
                 rs.getLong("id"),
                 UUID.fromString(rs.getString("seller_uuid")),
@@ -507,7 +821,8 @@ public final class Store {
                 rs.getDouble("price"),
                 rs.getLong("created"),
                 blob,
-                nz(rs, "nested_keys"));
+                nested,
+                code);
     }
 
     public void setBan(String server, UUID uuid, String reason) throws Exception {

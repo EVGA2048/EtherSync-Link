@@ -17,7 +17,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-VERSION = "1.0.0"
+VERSION = "1.0.3"
 DEFAULT_PORT = 8765
 DEFAULT_NAME = "以太货栈"
 
@@ -28,6 +28,11 @@ def now_ms() -> int:
 
 def sha256(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def claim_hash(code: str) -> str:
+    digits = "".join(c for c in str(code or "") if c.isdigit())
+    return hashlib.sha256(("eslink-claim-v1|" + digits).encode("utf-8")).hexdigest()
 
 
 class Store:
@@ -55,7 +60,8 @@ class Store:
                     blurb TEXT NOT NULL DEFAULT '',
                     color TEXT NOT NULL DEFAULT 'LIGHT_BLUE',
                     icon TEXT NOT NULL DEFAULT 'TERRACOTTA',
-                    heartbeat INTEGER NOT NULL DEFAULT 0
+                    heartbeat INTEGER NOT NULL DEFAULT 0,
+                    link_rate REAL NOT NULL DEFAULT 1
                 );
                 CREATE TABLE IF NOT EXISTS listings (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -68,8 +74,12 @@ class Store:
                     price REAL NOT NULL,
                     created INTEGER NOT NULL,
                     blob_b64 TEXT,
-                    nested_keys TEXT
+                    nested_keys TEXT,
+                    claim_hash TEXT NOT NULL DEFAULT '',
+                    claim_code TEXT
                 );
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_listings_claim ON listings(claim_code)
+                    WHERE claim_code IS NOT NULL AND claim_code != '';
                 CREATE INDEX IF NOT EXISTS idx_listings_server ON listings(server_code);
                 CREATE INDEX IF NOT EXISTS idx_listings_seller ON listings(seller_uuid);
                 """
@@ -77,6 +87,21 @@ class Store:
             self._meta_set("name", name)
             self._meta_set("token_hash", sha256(token))
             self._meta_set("version", VERSION)
+            try:
+                self.db.execute("ALTER TABLE servers ADD COLUMN link_rate REAL NOT NULL DEFAULT 1")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                self.db.execute("ALTER TABLE listings ADD COLUMN claim_code TEXT")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                self.db.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_listings_claim ON listings(claim_code) "
+                    "WHERE claim_code IS NOT NULL AND claim_code != ''"
+                )
+            except sqlite3.OperationalError:
+                pass
             self.db.commit()
 
     def _meta_set(self, k: str, v: str) -> None:
@@ -117,19 +142,26 @@ class Store:
         blurb = str(body.get("blurb") or "")
         color = str(body.get("color") or "LIGHT_BLUE")
         icon = str(body.get("icon") or "TERRACOTTA")
+        try:
+            rate = float(body.get("link_rate") or 1)
+        except (TypeError, ValueError):
+            rate = 1.0
+        if rate <= 0:
+            rate = 1.0
         with self.lock:
             self.db.execute(
                 """
-                INSERT INTO servers(code, name, blurb, color, icon, heartbeat)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO servers(code, name, blurb, color, icon, heartbeat, link_rate)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(code) DO UPDATE SET
                     name=excluded.name,
                     blurb=excluded.blurb,
                     color=excluded.color,
                     icon=excluded.icon,
-                    heartbeat=excluded.heartbeat
+                    heartbeat=excluded.heartbeat,
+                    link_rate=excluded.link_rate
                 """,
-                (code, name, blurb, color, icon, now_ms()),
+                (code, name, blurb, color, icon, now_ms(), rate),
             )
             self.db.commit()
             return {"ok": True, "name": self._meta_get("name", DEFAULT_NAME)}
@@ -138,11 +170,17 @@ class Store:
         clock = now_ms()
         with self.lock:
             rows = self.db.execute(
-                "SELECT code, name, blurb, color, icon, heartbeat FROM servers ORDER BY name"
+                "SELECT code, name, blurb, color, icon, heartbeat, link_rate FROM servers ORDER BY name"
             ).fetchall()
         out = []
         for r in rows:
             age = clock - int(r["heartbeat"] or 0)
+            try:
+                rate = float(r["link_rate"] or 1)
+            except (TypeError, ValueError, KeyError):
+                rate = 1.0
+            if rate <= 0:
+                rate = 1.0
             out.append(
                 {
                     "code": r["code"],
@@ -150,6 +188,7 @@ class Store:
                     "blurb": r["blurb"],
                     "color": r["color"],
                     "icon": r["icon"],
+                    "link_rate": rate,
                     "heartbeat": r["heartbeat"],
                     "clock": clock,
                     "online": 0 <= age < offline_after_ms,
@@ -170,6 +209,8 @@ class Store:
             "created": r["created"],
             "blob_b64": r["blob_b64"] or "",
             "nested_keys": r["nested_keys"] or "",
+            "claim_code": str(r["claim_code"] if "claim_code" in r.keys() else "") or "",
+            "has_claim": bool(str(r["claim_code"] if "claim_code" in r.keys() else "").strip()),
         }
 
     def listings(self, server: str | None, query: str | None, seller: str | None,
@@ -208,12 +249,15 @@ class Store:
         price = float(body.get("price") or 0)
         if price < 0:
             raise ValueError("价格无效")
+        raw_code = str(body.get("claim_code") or "").strip()
+        digits = "".join(c for c in raw_code if c.isdigit())
+        code = digits if len(digits) == 6 else None
         with self.lock:
             cur = self.db.execute(
                 """
                 INSERT INTO listings(seller_uuid, seller_name, server_code, item_key, item_name,
-                                     amount, price, created, blob_b64, nested_keys)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                     amount, price, created, blob_b64, nested_keys, claim_code)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     str(body["seller_uuid"]),
@@ -226,6 +270,7 @@ class Store:
                     now_ms(),
                     str(body.get("blob_b64") or ""),
                     str(body.get("nested_keys") or ""),
+                    code,
                 ),
             )
             self.db.commit()
@@ -249,6 +294,32 @@ class Store:
             self.db.execute("DELETE FROM listings WHERE id=?", (listing_id,))
             self.db.commit()
             return self._listing_dict(r)
+
+    def claim_taken(self, code: str) -> bool:
+        digits = "".join(c for c in str(code or "") if c.isdigit())
+        if len(digits) != 6:
+            return False
+        with self.lock:
+            r = self.db.execute("SELECT 1 FROM listings WHERE claim_code=?", (digits,)).fetchone()
+        return r is not None
+
+    def listing_by_claim(self, code: str) -> dict | None:
+        digits = "".join(c for c in str(code or "") if c.isdigit())
+        if len(digits) != 6:
+            return None
+        with self.lock:
+            r = self.db.execute("SELECT * FROM listings WHERE claim_code=?", (digits,)).fetchone()
+        return self._listing_dict(r) if r else None
+
+    def verify_claim(self, listing_id: int, code: str) -> bool:
+        with self.lock:
+            r = self.db.execute("SELECT claim_hash FROM listings WHERE id=?", (listing_id,)).fetchone()
+        if r is None:
+            return False
+        stored = str(r["claim_hash"] or "")
+        if not stored.strip():
+            return False
+        return stored.lower() == claim_hash(code)
 
     def set_price(self, listing_id: int, price: float) -> bool:
         if price < 0:
@@ -345,6 +416,10 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/v1/servers":
                 self._send(200, {"ok": True, "servers": self.store.servers()})
                 return
+            if path == "/v1/listings/claim-taken":
+                code = (q.get("code") or [""])[0]
+                self._send(200, {"ok": True, "taken": self.store.claim_taken(code)})
+                return
             if path == "/v1/listings":
                 server = (q.get("server") or [None])[0]
                 query = (q.get("q") or [None])[0]
@@ -376,9 +451,21 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/v1/heartbeat":
                 self._send(200, self.store.heartbeat(body))
                 return
+            if path == "/v1/listings/by-claim":
+                row = self.store.listing_by_claim(str(body.get("code") or ""))
+                if row is None:
+                    self._send(404, {"ok": False, "error": "货物不存在"})
+                    return
+                self._send(200, {"ok": True, "listing": row})
+                return
             if path == "/v1/listings":
                 row = self.store.insert(body)
                 self._send(200, {"ok": True, "listing": row})
+                return
+            if path.endswith("/verify-claim") and path.startswith("/v1/listings/"):
+                lid = int(path.split("/")[-2])
+                ok = self.store.verify_claim(lid, str(body.get("code") or ""))
+                self._send(200, {"ok": True, "match": ok})
                 return
             if path.endswith("/claim") and path.startswith("/v1/listings/"):
                 lid = int(path.split("/")[-2])

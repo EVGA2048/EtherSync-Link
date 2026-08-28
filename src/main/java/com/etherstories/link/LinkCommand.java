@@ -1,5 +1,6 @@
 package com.etherstories.link;
 
+import org.bukkit.Bukkit;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabExecutor;
@@ -27,6 +28,36 @@ public final class LinkCommand implements TabExecutor {
             sender.sendMessage(ColorUtil.colorize(ok
                     ? "&bESLink &7» &f已重载配置并重新连接。"
                     : "&bESLink &7» &c重载失败，请检查 config.yml 中的 MySQL。"));
+            return true;
+        }
+        if (args.length > 0 && (args[0].equalsIgnoreCase("pinreset") || args[0].equalsIgnoreCase("walletreset"))) {
+            if (!sender.hasPermission("eslink.admin")) {
+                sender.sendMessage(ColorUtil.colorize("&c没有权限"));
+                return true;
+            }
+            plugin.ensureCore();
+            if (args.length < 2) {
+                sender.sendMessage(ColorUtil.colorize("&bESLink &7» &f用法: /link pinreset <玩家>"));
+                return true;
+            }
+            if (!plugin.store().ready()) {
+                sender.sendMessage(ColorUtil.colorize("&c数据库未连接"));
+                return true;
+            }
+            org.bukkit.OfflinePlayer t = Bukkit.getOfflinePlayer(args[1]);
+            java.util.UUID u = t.getUniqueId();
+            org.bukkit.Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+                try {
+                    plugin.store().walletClearClaim(u);
+                    String who = t.getName() == null ? args[1] : t.getName();
+                    org.bukkit.Bukkit.getScheduler().runTask(plugin, () ->
+                            sender.sendMessage(ColorUtil.colorize("&bESLink &7» &f已清除 "
+                                    + who + " 的钱包码。下次存入会生成新码。")));
+                } catch (Exception e) {
+                    org.bukkit.Bukkit.getScheduler().runTask(plugin, () ->
+                            sender.sendMessage(ColorUtil.colorize("&c清除失败")));
+                }
+            });
             return true;
         }
         if (args.length > 0 && (args[0].equalsIgnoreCase("version") || args[0].equalsIgnoreCase("ver"))) {
@@ -137,6 +168,16 @@ public final class LinkCommand implements TabExecutor {
             }
             if (a.equals("settings") || a.equals("设置") || a.equals("config")) {
                 plugin.gui().openSettings(p);
+                return true;
+            }
+            if (a.equals("wallet") || a.equals("余额") || a.equals("转账") || a.equals("pay")) {
+                plugin.ensureCore();
+                plugin.gui().openWallet(p);
+                return true;
+            }
+            if (a.equals("claim") || a.equals("取件") || a.equals("pickup")) {
+                plugin.ensureCore();
+                plugin.gui().beginClaimCode(p);
                 return true;
             }
             if (a.equals("log") || a.equals("logs") || a.equals("日志")) {
@@ -403,7 +444,7 @@ public final class LinkCommand implements TabExecutor {
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         if (args.length == 1) {
             String pfx = args[0].toLowerCase(Locale.ROOT);
-            return Stream.of("chest", "互通箱", "io", "stick", "调试棒", "unlink", "chat", "msg", "ignore", "unignore", "market", "reload", "version", "help", "settings", "log", "diag", "transport", "component", "cleanitem")
+            return Stream.of("chest", "互通箱", "io", "stick", "调试棒", "unlink", "chat", "msg", "ignore", "unignore", "wallet", "claim", "取件", "pinreset", "market", "reload", "version", "help", "settings", "log", "diag", "transport", "component", "cleanitem")
                     .filter(s -> s.startsWith(pfx))
                     .toList();
         }

@@ -14,7 +14,7 @@ import java.util.Set;
 public final class ConfigUpdater {
 
     /** 与 config.yml 的 config-version 一起加 */
-    public static final int CURRENT_VERSION = 17;
+    public static final int CURRENT_VERSION = 21;
 
     private ConfigUpdater() {}
 

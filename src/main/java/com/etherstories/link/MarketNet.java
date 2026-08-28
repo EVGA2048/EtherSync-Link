@@ -144,9 +144,10 @@ public final class MarketNet {
         String blurb = plugin.serverBlurb();
         String color = plugin.serverColor();
         String icon = plugin.serverIcon();
+        double rate = plugin.linkRate();
         for (MarketClient c : clients.values()) {
             try {
-                c.heartbeat(code, name, blurb, color, icon);
+                c.heartbeat(code, name, blurb, color, icon, rate);
             } catch (Exception e) {
                 c.markFail(e.getMessage());
             }
@@ -173,13 +174,33 @@ public final class MarketNet {
     }
 
     public void insert(Player p, UUID seller, String sellerName, String server, String itemKey, String itemName,
-                       int amount, double price, String b64, String nestedKeys) throws Exception {
+                       int amount, double price, String b64, String nestedKeys, String claimCode) throws Exception {
         MarketClient c = clientOf(p);
         if (c != null) {
-            c.insert(seller, sellerName, server, itemKey, itemName, amount, price, b64, nestedKeys);
+            c.insert(seller, sellerName, server, itemKey, itemName, amount, price, b64, nestedKeys, claimCode);
             return;
         }
-        plugin.store().insertListing(seller, sellerName, server, itemKey, itemName, amount, price, b64, nestedKeys);
+        plugin.store().insertListing(seller, sellerName, server, itemKey, itemName, amount, price, b64, nestedKeys, claimCode);
+    }
+
+    public String allocClaimCode(Player p) throws Exception {
+        for (int i = 0; i < 40; i++) {
+            String code = ClaimCodes.generate();
+            if (!claimTaken(p, code)) return code;
+        }
+        throw new Exception("取件码已用尽，请稍后再上架");
+    }
+
+    public boolean claimTaken(Player p, String code) throws Exception {
+        MarketClient c = clientOf(p);
+        if (c != null) return c.claimTaken(code);
+        return plugin.store().claimCodeTaken(code);
+    }
+
+    public Models.Listing listingByClaim(Player p, String code) throws Exception {
+        MarketClient c = clientOf(p);
+        if (c != null) return c.listingByClaim(code);
+        return plugin.store().listingByClaim(code);
     }
 
     public boolean delete(Player p, long id) throws Exception {

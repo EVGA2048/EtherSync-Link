@@ -39,13 +39,14 @@ final class MarketClient {
         return o;
     }
 
-    void heartbeat(String code, String name, String blurb, String color, String icon) throws Exception {
+    void heartbeat(String code, String name, String blurb, String color, String icon, double linkRate) throws Exception {
         JsonObject body = new JsonObject();
         body.addProperty("code", code);
         body.addProperty("name", name);
         body.addProperty("blurb", blurb == null ? "" : blurb);
         body.addProperty("color", color);
         body.addProperty("icon", icon);
+        body.addProperty("link_rate", linkRate <= 0 ? 1 : linkRate);
         JsonObject o = post("/v1/heartbeat", body);
         if (o.has("name")) hub.name = o.get("name").getAsString();
         markOk();
@@ -66,6 +67,7 @@ final class MarketClient {
                     str(s, "blurb"),
                     str(s, "color").isBlank() ? "LIGHT_BLUE" : str(s, "color"),
                     str(s, "icon").isBlank() ? "TERRACOTTA" : str(s, "icon"),
+                    dbl(s, "link_rate", 1),
                     num(s, "heartbeat"),
                     s.has("clock") ? num(s, "clock") : clock));
         }
@@ -98,7 +100,7 @@ final class MarketClient {
     }
 
     Models.Listing insert(UUID seller, String sellerName, String server, String itemKey, String itemName,
-                          int amount, double price, String b64, String nestedKeys) throws Exception {
+                          int amount, double price, String b64, String nestedKeys, String claimCode) throws Exception {
         JsonObject body = new JsonObject();
         body.addProperty("seller_uuid", seller.toString());
         body.addProperty("seller_name", sellerName);
@@ -109,9 +111,29 @@ final class MarketClient {
         body.addProperty("price", price);
         body.addProperty("blob_b64", b64 == null ? "" : b64);
         body.addProperty("nested_keys", nestedKeys == null ? "" : nestedKeys);
+        if (claimCode != null && !claimCode.isBlank()) body.addProperty("claim_code", claimCode);
         JsonObject o = post("/v1/listings", body);
         markOk();
         return o.has("listing") ? readListing(o.getAsJsonObject("listing")) : null;
+    }
+
+    boolean claimTaken(String code) throws Exception {
+        JsonObject o = get("/v1/listings/claim-taken?code=" + enc(ClaimCodes.normalize(code)), true);
+        markOk();
+        return o.has("taken") && o.get("taken").getAsBoolean();
+    }
+
+    Models.Listing listingByClaim(String code) throws Exception {
+        JsonObject body = new JsonObject();
+        body.addProperty("code", code == null ? "" : code);
+        try {
+            JsonObject o = post("/v1/listings/by-claim", body);
+            markOk();
+            return o.has("listing") ? readListing(o.getAsJsonObject("listing")) : null;
+        } catch (HttpStatus e) {
+            if (e.code == 404) return null;
+            throw e;
+        }
     }
 
     boolean delete(long id) throws Exception {
@@ -219,7 +241,8 @@ final class MarketClient {
                 o.has("price") && !o.get("price").isJsonNull() ? o.get("price").getAsDouble() : 0,
                 num(o, "created"),
                 blob,
-                str(o, "nested_keys"));
+                str(o, "nested_keys"),
+                str(o, "claim_code"));
     }
 
     private static String str(JsonObject o, String k) {
@@ -233,6 +256,16 @@ final class MarketClient {
             return o.get(k).getAsLong();
         } catch (Exception e) {
             return (long) o.get(k).getAsDouble();
+        }
+    }
+
+    private static double dbl(JsonObject o, String k, double d) {
+        if (!o.has(k) || o.get(k).isJsonNull()) return d;
+        try {
+            double v = o.get(k).getAsDouble();
+            return v <= 0 ? d : v;
+        } catch (Exception e) {
+            return d;
         }
     }
 

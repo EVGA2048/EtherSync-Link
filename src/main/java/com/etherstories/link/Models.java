@@ -4,7 +4,8 @@ import java.util.UUID;
 
 public final class Models {
 
-    public record ServerRow(String code, String name, String shortName, String blurb, String color, String icon, long heartbeat, long clock) {
+    public record ServerRow(String code, String name, String shortName, String blurb, String color, String icon,
+                            double linkRate, long heartbeat, long clock) {
         public boolean online(long offlineAfterMs) {
             if (heartbeat <= 0) return false;
             long age = clock - heartbeat;
@@ -14,7 +15,11 @@ public final class Models {
 
     public record Listing(long id, UUID seller, String sellerName, String serverCode,
                           String itemKey, String itemName, int amount, double price,
-                          long created, byte[] blob, String nestedKeys) {}
+                          long created, byte[] blob, String nestedKeys, String claimCode) {
+        public boolean hasClaim() {
+            return claimCode != null && !claimCode.isBlank();
+        }
+    }
 
     public record QueueRow(long id, String fromCode, String toCode, String pairCode,
                            String itemKey, String itemName, int amount, String status,

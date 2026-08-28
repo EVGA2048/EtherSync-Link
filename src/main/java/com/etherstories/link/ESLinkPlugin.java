@@ -32,8 +32,12 @@ public final class ESLinkPlugin extends JavaPlugin {
     private volatile boolean transportEnabled = true;
     private final Set<String> blockedComponents = ConcurrentHashMap.newKeySet();
     private final Map<UUID, Long> selfBuyAt = new ConcurrentHashMap<>();
+    private final Map<UUID, ClaimGate> claimGates = new ConcurrentHashMap<>();
     private NamespacedKey selfBuyDayKey;
     private NamespacedKey selfBuyCountKey;
+    private NamespacedKey claimMissKey;
+    private NamespacedKey claimMissLockKey;
+    private NamespacedKey claimHeadLockKey;
 
     @Override
     public void onEnable() {
@@ -95,6 +99,9 @@ public final class ESLinkPlugin extends JavaPlugin {
         else markets.reload();
         if (selfBuyDayKey == null) selfBuyDayKey = new NamespacedKey(this, "sb_day");
         if (selfBuyCountKey == null) selfBuyCountKey = new NamespacedKey(this, "sb_n");
+        if (claimMissKey == null) claimMissKey = new NamespacedKey(this, "cm_n");
+        if (claimMissLockKey == null) claimMissLockKey = new NamespacedKey(this, "cm_lock");
+        if (claimHeadLockKey == null) claimHeadLockKey = new NamespacedKey(this, "cm_head");
     }
 
     /** 从 config 加载急停开关与组件黑名单（重启/重载后仍生效）。 */
@@ -199,7 +206,7 @@ public final class ESLinkPlugin extends JavaPlugin {
         Bukkit.getScheduler().runTaskTimerAsynchronously(this, () -> {
             try {
                 if (store != null && store.ready()) {
-                    store.heartbeat(serverCode(), serverName(), serverShort(), serverBlurb(), serverColor(), serverIcon());
+                    store.heartbeat(serverCode(), serverName(), serverShort(), serverBlurb(), serverColor(), serverIcon(), linkRate());
                     rememberServers(store.servers());
                     Compat.publish(this);
                     Compat.refresh(this);
@@ -509,6 +516,102 @@ public final class ESLinkPlugin extends JavaPlugin {
 
     public boolean tradeEnabled() { return getConfig().getBoolean("trade.enabled", true); }
 
+    public boolean walletEnabled() { return getConfig().getBoolean("trade.wallet", true); }
+
+    public boolean claimCodeEnabled() { return getConfig().getBoolean("trade.claim-code", true); }
+
+    public void setClaimCodeEnabled(boolean v) {
+        getConfig().set("trade.claim-code", v);
+        saveConfig();
+    }
+
+    public String pickupLocked(Player p) {
+        long now = System.currentTimeMillis();
+        var pdc = p.getPersistentDataContainer();
+        long head = pdc.getOrDefault(claimHeadLockKey, PersistentDataType.LONG, 0L);
+        if (now < head) {
+            long sec = Math.max(1, (head - now) / 1000L);
+            return "取件已暂停（点错货主）。请 " + sec + " 秒后再试。";
+        }
+        long miss = pdc.getOrDefault(claimMissLockKey, PersistentDataType.LONG, 0L);
+        if (now < miss) {
+            long sec = Math.max(1, (miss - now) / 1000L);
+            return "取件已暂停（多次输入无效取件码）。请 " + sec + " 秒后再试。";
+        }
+        return null;
+    }
+
+    public void pickupMiss(Player p) {
+        var pdc = p.getPersistentDataContainer();
+        int n = pdc.getOrDefault(claimMissKey, PersistentDataType.INTEGER, 0) + 1;
+        int limit = Math.max(2, getConfig().getInt("trade.claim-miss-limit", 5));
+        pdc.set(claimMissKey, PersistentDataType.INTEGER, n);
+        if (n >= limit) {
+            int min = Math.max(1, getConfig().getInt("trade.claim-miss-lock-minutes", 30));
+            pdc.set(claimMissLockKey, PersistentDataType.LONG, System.currentTimeMillis() + min * 60_000L);
+            pdc.set(claimMissKey, PersistentDataType.INTEGER, 0);
+            pingAdmins("&c" + p.getName() + " 连续输入不存在的取件码 " + limit + " 次，已锁定 " + min + " 分钟。");
+            pluginMsgLock(p, "无效取件码次数过多，取件已暂停 " + min + " 分钟。");
+        }
+    }
+
+    public void pickupMissReset(Player p) {
+        p.getPersistentDataContainer().set(claimMissKey, PersistentDataType.INTEGER, 0);
+    }
+
+    public void pickupHeadFail(Player p) {
+        int min = Math.max(1, getConfig().getInt("trade.claim-head-lock-minutes", 60));
+        p.getPersistentDataContainer().set(claimHeadLockKey, PersistentDataType.LONG,
+                System.currentTimeMillis() + min * 60_000L);
+        pingAdmins("&c" + p.getName() + " 取件时点错货主，已锁定 " + min + " 分钟。");
+    }
+
+    public void pingAdmins(String colored) {
+        String line = ColorUtil.colorize("&bESLink &7» &f" + colored);
+        for (Player a : Bukkit.getOnlinePlayers()) {
+            if (a.hasPermission("eslink.admin")) a.sendMessage(line);
+        }
+        getLogger().info(ColorUtil.colorize(colored).replaceAll("§.", ""));
+    }
+
+    private void pluginMsgLock(Player p, String s) {
+        msg(p, "&c" + s);
+    }
+
+    public String claimLocked(Player p) {
+        ClaimGate g = claimGates.get(p.getUniqueId());
+        if (g == null) return null;
+        long now = System.currentTimeMillis();
+        if (now < g.lockUntil) {
+            long sec = Math.max(1, (g.lockUntil - now) / 1000L);
+            return "试错次数过多，请 " + sec + " 秒后再试。";
+        }
+        return null;
+    }
+
+    public void claimFail(Player p) {
+        ClaimGate g = claimGates.computeIfAbsent(p.getUniqueId(), u -> new ClaimGate());
+        g.fails++;
+        if (g.fails >= 8) {
+            g.lockUntil = System.currentTimeMillis() + 15 * 60_000L;
+            g.fails = 0;
+        }
+    }
+
+    public void claimOk(Player p) {
+        claimGates.remove(p.getUniqueId());
+    }
+
+    private static final class ClaimGate {
+        int fails;
+        long lockUntil;
+    }
+
+    public void setWalletEnabled(boolean v) {
+        getConfig().set("trade.wallet", v);
+        saveConfig();
+    }
+
     public double taxRate() {
         double r = getConfig().getDouble("trade.tax-rate", 0);
         if (r < 0) return 0;
@@ -518,7 +621,74 @@ public final class ESLinkPlugin extends JavaPlugin {
 
     public double taxOf(double price) {
         if (!tradeEnabled() || price <= 0) return 0;
-        return Math.round(price * taxRate() * 100.0) / 100.0;
+        return roundMoney(price * taxRate());
+    }
+
+    /** 1 本服货币 = link-rate 互通货币。1:1.5 填 1.5。 */
+    public double linkRate() {
+        double r = getConfig().getDouble("trade.link-rate", 1);
+        if (r <= 0) return 1;
+        if (r > 1000) return 1000;
+        return roundMoney(r);
+    }
+
+    public void setLinkRate(double rate) {
+        if (rate < 0.01) rate = 0.01;
+        if (rate > 1000) rate = 1000;
+        getConfig().set("trade.link-rate", roundMoney(rate));
+        saveConfig();
+        Bukkit.getScheduler().runTaskAsynchronously(this, () -> {
+            try {
+                if (store != null && store.ready()) {
+                    store.heartbeat(serverCode(), serverName(), serverShort(), serverBlurb(),
+                            serverColor(), serverIcon(), linkRate());
+                }
+                if (markets != null) markets.heartbeatAll();
+            } catch (Exception ignored) {}
+        });
+    }
+
+    public String linkRateText() {
+        return "1:" + stripZeros(linkRate());
+    }
+
+    public double linkRateOf(String code) {
+        if (code != null && code.equalsIgnoreCase(serverCode())) return linkRate();
+        if (code == null) return 1;
+        Models.ServerRow s = serverCache.get(code.toUpperCase(Locale.ROOT));
+        if (s == null || s.linkRate() <= 0) return 1;
+        return s.linkRate();
+    }
+
+    public String linkRateTextOf(String code) {
+        return "1:" + stripZeros(linkRateOf(code));
+    }
+
+    public double toLink(double local) {
+        return roundMoney(local * linkRate());
+    }
+
+    public double toLocal(double link) {
+        return roundMoney(link / linkRate());
+    }
+
+    public String money(double v) {
+        return vault().ok() ? vault().format(v) : stripZeros(v);
+    }
+
+    static double roundMoney(double v) {
+        return Math.round(v * 100.0) / 100.0;
+    }
+
+    static String stripZeros(double v) {
+        if (Math.abs(v - Math.round(v)) < 0.0001) return String.valueOf(Math.round(v));
+        return String.format("%.2f", v);
+    }
+
+    static boolean isAllAmount(String msg) {
+        if (msg == null) return false;
+        String s = msg.trim();
+        return s.equalsIgnoreCase("all") || s.equals("全部") || s.equalsIgnoreCase("max");
     }
 
     public boolean selfBuyEnabled() {
@@ -536,10 +706,10 @@ public final class ESLinkPlugin extends JavaPlugin {
         return r;
     }
 
-    /** 跨服取回：货款不打给自己，只收 max(保底, 互通税 + 抽成)。 */
-    public double selfBuyFee(double price) {
-        double tax = taxOf(price);
-        double extra = Math.round(Math.max(0, price) * selfBuySurcharge() * 100.0) / 100.0;
+    /** 跨服取回：货款不打给自己，只收 max(保底, 互通税 + 抽成)。参数为本服货币。 */
+    public double selfBuyFee(double localPrice) {
+        double tax = taxOf(localPrice);
+        double extra = roundMoney(Math.max(0, localPrice) * selfBuySurcharge());
         return Math.max(selfBuyMinFee(), tax + extra);
     }
 
