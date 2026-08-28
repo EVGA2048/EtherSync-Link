@@ -1,101 +1,253 @@
 # EtherSync-Link（ESLink）
 
-Paper / Bukkit 跨服互通插件，面向 **EtherStories（ES2）** 与姊妹服（如 SNC）等多服网络。
+Paper / Bukkit 跨服互通插件。给多台生存服接大厅、市场、运输箱、红石和聊天，入口是 `/link`（也可用 `/eslink`、`/互通`）。
+
+还在开发中，功能和默认配置都可能改。遇到问题、有想法、或想一起改，欢迎开 [Issue](https://github.com/EVGA2048/EtherSync-Link/issues) 或提交 [Pull Request](https://github.com/EVGA2048/EtherSync-Link/pulls)。
+
+当前版本以 `plugin.yml` / `pom.xml` 为准。
+
+---
 
 ## 起因
 
-ES2 即 EtherStories。两台服务器模组大体相近，却不完全一致；不少玩家会在两边来回搭建机械动力产线。
-与其让产线、物资、协作被服际边界切断，不如用插件把两服玩家联动起来——物品、红石、聊天与交易都能跨服对接，生产线也能「跨服接轨」。
+最初是 EtherStories 和它的姊妹服之间要用：模组差不多，产线、箱子、聊天却过不去。后来就按「多台生存服之间够用」接着做。
 
-## 能做什么
+大厅里能看见对面在不在；货可以上架给另一边买；运输箱按节拍把物品送过去；红石灯能对端亮；聊天可以选听哪些服。它不是实时管道，也不是共用一份经济账户，更不是代理或 Bungee 传送。
 
-各服安装同一插件。聊天与运输箱共用 MySQL；货单可改走独立的市场服务（自带 SQLite，不必再为市场搭库）。入口：`/link`（别名 `/eslink`、`/互通`）。
+---
 
-| 能力 | 说明 |
-|------|------|
-| **互通大厅** | GUI 查看状态；跨服上架 / 购买（可选 Vault 与税率）；可切换多个市场 |
-| **TX / RX 运输箱** | 配对发送箱与接收箱，按扫描周期经队列把物品运到对端服 |
-| **跨服红石 IO** | 默认事件时间戳回放：电平变化写入 `link_io_events`，接收端按原间隔还原 |
-| **跨服聊天** | 发言范围与接收选台（白名单）；私聊；可附带物品展示 |
-| **通知与运维** | 上架广播、建箱提醒、`/link diag`、说明书、超级管理清理脏数据等 |
+## 两套数据，别混
 
-运输箱适合产线：每轮多送几组，路上积压满了会暂停，而不是实时管道。纸箱 / 潜影盒等重物可先倒计时再发。
+| | 存在哪 | 干什么 |
+|---|---|---|
+| 插件连的 **MySQL** | 各服填同一份库 | 服心跳、聊天、运输箱、红石、上架通知 |
+| **市场服务**（可选） | 一个 Python 进程 + 自带 SQLite | 只管货单：上架、列表、下架、买走 |
 
-## 市场服务（可选）
+聊天和箱子一直走 MySQL。货单可以继续放在这份 MySQL 里（和以前一样）；也可以改走市场服务——别人想「只加入你们的市场」时，就不用再自己搭库。
 
-不想为货单单独搭 MySQL 时，启动仓库内 `market-server/etherlink_market.py`（Python 3，无额外依赖）：
+没在配置里登记任何市场时，货单仍用 MySQL，行为与 0.2.0 之前接近。一旦登记了市场，上架和购买改走 HTTP，旧货单不会自动搬家，需要重新上架，或暂时先不登记、继续用库里的货。
+
+钱始终在**买家所在那台服**的 Vault 上结算。卖家收到的是这台服账户里的钱，不是对面服打过来的。市场服务不记账本。
+
+---
+
+## 环境
+
+各服都要：
+
+- Java 21
+- Paper 1.21+（也在 Youer、Arclight 这类核心上用过；聊天拦截跟原版签名有关，换核心后请先拿 `/link chat` 试一句）
+- 一份各服都能连上的 **MySQL**
+
+可选：
+
+- **Vault** 以及一台经济插件：不装也能上架标价为 0 的货，有标价就买不了
+- **ES2UniPlugin**：税账户没填时，会尝试读它的 `tax.sink-account`
+- **Python 3.10+**：只有启用独立市场时才需要，无 pip 依赖
+
+---
+
+## 安装
+
+1. 把 `ESLink-x.x.x.jar` 放进每台服的 `plugins/`，启动一次，生成 `plugins/ESLink/config.yml`。
+2. 各服填**同一套** MySQL。
+3. 每台服改 `server`：
+   - `code`：内部代号，只能字母数字，必须唯一。牌子和配对用它，玩家界面不显示。
+   - `name` / `blurb`：大厅里给人看的名字和一句简介。
+   - `icon`：`TERRACOTTA` 或 `CONCRETE`。
+   - `color`：大厅陶瓦颜色，也决定外服聊天前缀的颜色。
+4. 重载：`/link reload`（需要 `eslink.admin`）。
+
+新版本会自动补配置里缺的键，已经填过的值不会被覆盖。
+
+大厅顶上一排能看见各服是否在线。心跳默认 5 秒一次，超过约 20 秒没跳就显示离线。
+
+---
+
+## 玩家怎么用
+
+日常几乎只开 `/link` 大厅。对准箱子或红石灯再输入 `/link`，会直接进对应节点菜单。
+
+游戏里有一本说明书：大厅下方，或 `/link help`。
+
+### 市场
+
+大厅点「跨服市场」。若登记了多个市场，顶栏可以点名称切换；当前市场的名字会写在界面上。换市场就是换一份货单，A 市场上的货不会出现在 B。
+
+- 主手拿着物品，点上架，关掉界面后在聊天栏输入单价（`cancel` 取消）。
+- 左键购买，右键看卖家。
+- 「我的上架」左键下架（物品退回背包），右键改价。
+- 本服自己上的货不能买，请去下架。
+- 同一账号在**另一台服**上架的货可以「取回」：物品回到你手里，**货款不会打给你自己**，只收取回费（默认可开，有保底、冷却和每日次数，见下文「经济」）。
+- 本服识别不了的模组物品买不了。对端缺的附魔会在物品上注明，带回原服一般可以恢复。
+
+上架通知默认关，大厅里可以给自己打开。管理侧还有总闸（本服 / 外服广播）。
+
+### 聊天
+
+大厅点聊天，打开选台：
+
+- **发言**：仅本服，或发到全部已加入聊天网的服。
+- **接收**：不接收外服（默认）、全部，或按服勾选（陶瓦颜色即该服主题色）。
+
+外服消息前缀是 `[服名]`，颜色跟大厅标识一致。发言太快时，本条不会传到其他服，本服仍看得到。
+
+`/link msg 玩家 内容` 可以跨服私聊。聊天里输入 `[i]` 会带上主手物品。
+
+`/link ignore player 名`、`/link ignore server 服名` 仍可用，选台是给「我想听谁」用的，屏蔽是另一层。
+
+### 运输箱
+
+看准箱子（大约 5 格），`/link chest` 或大厅里的入口。也可以 `/link stick` 拿调试棒点箱子，不必蹲下。
+
+登记成 TX（发送）或 RX（接收），配对对面的节点。发送箱必须另绑一口回退箱：对面没有的物品、发失败的货会回到那里；回退箱满了，发送会停，不会把东西吞掉。
+
+这是给产线用的节拍传输：默认大约 2 秒一轮，每轮几组，路上积压到上限就暂停。不是即时管道，漏斗对灌 TX/RX 会对不上节拍，不要那么接。
+
+纸箱、潜影盒等带内含的会整包走，并多一段倒计时再发。TX 可以按物品或模组命名空间过滤，空手点过滤即可清掉。
+
+牌子可以蹲下点开菜单。拆除要确认两次。只有箱子主人或管理能改、能拆。大厅「我的节点」能指向本服坐标。
+
+### 红石
+
+对准红石灯本身（不要对着旁边的方块），`/link io`。灯亮表示对端在线；离线变灰，故障变红。接收灯输出 0–15。对端掉线时输出固定为 0。
+
+电平变化写进 MySQL 事件表，对端按时间戳回放，不是每 tick 写库。接收端可以切正常 / 反向 / 满信号。
+
+---
+
+## 市场服务
+
+仓库里的 [`market-server/`](market-server/) 是一个独立进程，自带 SQLite，不用再为货单搭数据库。
 
 ```bash
 cd market-server
 python3 etherlink_market.py --name 以太货栈 --port 8765
 ```
 
-首次会在 `data/market.json` 写入令牌。插件 `config.yml` 的 `markets.list` 填写地址与令牌，或游戏内：
+第一次启动会在 `data/market.json` 写下接入令牌，并在终端打印出来。数据在 `data/market.sqlite`。换一个 `--data` 目录就是另一份市场。
+
+插件侧（需要 `eslink.admin`）：
 
 ```
 /link market add ether http://127.0.0.1:8765 令牌 以太货栈
 /link market default ether
+/link market
 ```
 
-可同时登记多个市场；玩家在大厅或市场页点击切换。未登记时，货单仍使用下方 MySQL。聊天与运输不会进入该进程。
+`add` / `remove` / `default` 会写回 `config.yml`，重启后还在。玩家只在 GUI 里点，不碰地址和令牌。
 
-## 环境要求
+也可以直接改配置：
 
-- Java 21
-- Paper（或兼容实现）**1.21+**（`api-version: 1.21`）
-- **MySQL**（各服指向同一库）
-- 可选：`Vault`（经济）、`ES2UniPlugin`（如税账户等联动）
+```yaml
+markets:
+  default: ether
+  list:
+    ether:
+      name: 以太货栈
+      url: http://127.0.0.1:8765
+      token: "与市场服务相同的令牌"
+```
 
-## 快速配置
+多服连同一市场时，把 `url` 写成它们能访问到的地址（内网 IP 或域名），防火墙放行端口。令牌不要提交到 git。
 
-1. 将构建产物放入各服 `plugins/`，启动一次生成 `plugins/ESLink/config.yml`。
-2. 填写 MySQL，并为每服设置唯一 `server.code`（仅字母数字，玩家界面不显示）以及展示用 `name` / `blurb` / `icon` / `color`。
-3. 重载：`/link reload`（需 `eslink.admin`）。
+市场服务**不管**聊天、箱子、红石，也**不扣款**。购买时它只负责「这件货还在不在」；扣钱、收税、把物品放进背包，都在买家那台 MC 服上完成。
 
-配置要点见默认 `config.yml` 注释，例如：
+更细的启动参数见 [market-server/README.md](market-server/README.md)。
 
-- `chest.*`：每轮组数、队列上限、重物延迟、容器收发策略
-- `io.*`：红石总开关与过期判定
-- `trade.*`：交易开关、税率、税入账账户、跨服取回费用
-- `markets.*`：独立市场服务列表（可空）
-- `chat.*`：跨服聊天与刷屏提醒
+---
 
-新版本会自动补缺失配置键，不会覆盖你已填过的值。
+## 经济
 
-## 常用指令
+需要 Vault。税率 `trade.tax-rate` 由**买家所在服**收，卖家仍拿标价。税进 `trade.sink-account`；留空则尝试 ES2UniPlugin，再空则税被销毁。
+
+跨服取回（同一 UUID、货在外服）：
+
+- 费用 = `max(保底, 互通税 + 标价抽成)`，保底默认 64
+- 冷却默认 20 秒，每天默认 12 次
+- `trade.self-buy: false` 可整段关掉，玩家只能到上架那台服下架
+
+不要把取回理解成「自己买自己」。税率为 0 时若把货款打回自己，等于白嫖跨服传物品，所以货款故意不入账。
+
+---
+
+## 物品怎么跨服
+
+- 原版物品按 Bukkit/Paper 数据传。
+- 模组物品看 namespaced key，两边都要有这个模组。
+- 非原版优先走 NBT，避免不同服之间数字 ID 对不上。
+- 纸箱、潜影盒等按内含拆开传；缺的子物品单独退回，其余照常到。
+- 每一批有校验，失败会整批隔离，不会塞给玩家。
+- 对面缺附魔/属性时，默认 `chest.unknown-extra: deliver`（送到并做标记）；改成 `refuse` 则整件退回。
+- 白名单 `whitelist` 为空表示不限制；正式服建议写成 `minecraft:iron_ingot` 这种 key。
+- 某类数据组件出问题，可用 `/link component block <id>` 应急拦截，物品会退回。
+- 旧版留在物品上的占位标识：`/link cleanitem`。
+
+容器（潜影盒、包裹等）默认 `chest.containers: auto`，启动时自检通过才收发。结果看 `/link diag`；`/link diag retry` 会重跑。
+
+---
+
+## 配置里常改的项
+
+默认 `config.yml` 里每段都有注释。下面只提容易设错的：
+
+| 键 | 含义 |
+|---|---|
+| `server.code` | 本服内部代号，全网唯一 |
+| `heartbeat-seconds` / `offline-after-seconds` | 心跳与离线判定 |
+| `chest.stacks-per-scan` | 每轮最多发几组 |
+| `chest.queue-limit` | 路上积压上限，满了 TX 暂停 |
+| `chest.batch-delay-seconds` | 发货倒计时；0 为立即 |
+| `chest.heavy-delay-seconds` / `heavy-max-seconds` | 纸箱等额外等待 |
+| `transport.enabled` | 全局运输；游戏里 `/link transport off` 可急停 |
+| `io.enabled` / `io.stale-ms` | 红石总闸；对端多久没更新就视为过期 |
+| `trade.*` | 交易、税率、取回 |
+| `markets.*` | 独立市场列表，可空 |
+| `chat.default` | 新玩家默认 `local`（不往外发、也不收外服） |
+| `chat.fast-window-seconds` / `fast-count` | 互通发言过快拦截 |
+| `super-admins` | 可删大厅里残留的错误服务器记录；也可给权限 `eslink.super` |
+
+红石不要改成「每 tick 写 MySQL」。两边 TPS 不同，对不齐，只会把库打满。
+
+---
+
+## 指令
+
+玩家：
 
 | 指令 | 作用 |
-|------|------|
-| `/link` | 打开互通大厅 |
+|---|---|
+| `/link` | 大厅；看准箱子/灯时直接进节点 |
 | `/link chest` | 运输箱菜单 |
-| `/link tx` / `/link rx` | 设置发送 / 接收箱 |
-| `/link io` | 红石控制器菜单 |
-| `/link settings` | 设置 |
+| `/link io` | 红石菜单 |
+| `/link tx` / `/link rx` | 把准星上的箱子设为发送 / 接收 |
+| `/link stick` | 调试棒 |
 | `/link chat` | 聊天选台 |
-| `/link market` | 查看 / 登记市场（管理） |
+| `/link chat local` / `all` | 发言范围 |
 | `/link msg <玩家> <内容>` | 私聊 |
+| `/link ignore` / `unignore` | 屏蔽 |
 | `/link help` | 说明书 |
-| `/link diag` | 容器/组件/快照诊断 |
-| `/link diag retry` | 重跑容器自检 |
-| `/link diag io` | 红石诊断 |
-| `/link transport on\|off` | 全局运输急停 |
-| `/link component block\|unblock\|list <id>` | 禁用/恢复数据组件 |
-| `/link cleanitem` | 清除背包/末影箱里的 ESLink 占位标识 |
-| `/link log clear` | 清空日志 |
-| `/link reload` | 重载配置并重连 MySQL |
+| `/link settings` | 设置（管理项仍要权限） |
+| `/link cleanitem` | 清占位标识 |
 
-权限：`eslink.use`、`eslink.chest`（默认开放），`eslink.admin` / `eslink.super`（默认 OP）。
-管理指令（`reload`、`transport`、`component`、`diag retry`）需 `eslink.admin`。
+管理（`eslink.admin`，默认 OP）：
 
-## 物品跨服说明
+| 指令 | 作用 |
+|---|---|
+| `/link reload` | 重载配置并重连 |
+| `/link market` | 列出已登记市场 |
+| `/link market add <代号> <地址> <令牌> [名称]` | 登记市场，写入配置 |
+| `/link market remove <代号>` | 移除 |
+| `/link market default <代号>` | 新玩家默认市场 |
+| `/link transport on` / `off` | 运输急停 |
+| `/link diag` / `diag retry` / `diag io` | 容器与红石诊断 |
+| `/link component list` / `block` / `unblock` | 数据组件黑名单 |
+| `/link log` / `log clear` / `log debug` | 日志 |
+| `/link version` | 版本与本服代号 |
 
-- 原版物品按 Bukkit/Paper 数据完整传输。
-- 模组物品以 namespaced key 为准，两端需安装相同模组。
-- 所有非原版物品优先使用 NBT 序列化，避免 `STREAM_CODEC` 注册表数字 ID 在不同服间错位。
-- Create 纸箱、潜影盒等容器按内含拆包传输；对端缺失的子物品会单独退回，其余照常送达。
-- 每批物品带 SHA-256 行级/批次级校验；校验失败会整批 quarantine，不会投递给玩家。
-- 对端缺失附魔/属性时，默认 `deliver`：物品送达并打标记，带回原服可恢复；`chest.unknown-extra: refuse` 则直接退回。
-- 旧版占位标识可用 `/link cleanitem` 清除。
+权限：`eslink.use`、`eslink.chest` 默认对所有人开放；`eslink.admin`、`eslink.super` 默认 OP。
+
+---
 
 ## 构建
 
@@ -103,16 +255,10 @@ python3 etherlink_market.py --name 以太货栈 --port 8765
 mvn -q package
 ```
 
-产物：`target/ESLink-<version>.jar`（同时复制到 `dist/`）。
+得到 `target/ESLink-<version>.jar`，并复制一份到 `dist/`。日常请用打好的 jar，不要把 `target/` 里的中间文件丢进插件目录。
 
-## 技术栈
-
-- Paper API 1.21
-- HikariCP + MySQL Connector/J
-- 可选 VaultAPI
-
-当前版本见 `pom.xml` / `plugin.yml`。
+---
 
 ## 许可证
 
-见仓库根目录 [LICENSE](LICENSE)。
+见 [LICENSE](LICENSE)。

@@ -1,27 +1,57 @@
-# EtherLink 市场服务
+# 市场服务
 
-独立进程，自带 SQLite，不必再搭 MySQL。Minecraft 服上的 ESLink 用 HTTP 接入。聊天与运输箱仍走插件里的 MySQL。
+给 ESLink 用的货单进程。自带 SQLite，不必再为市场搭 MySQL。
+
+Minecraft 各服上的插件用 HTTP 连过来。聊天、运输箱、红石仍走插件自己的 MySQL，不会进这个进程。这里也不扣玩家的钱：买的时候只决定「这件货还在不在」，扣款和发物品在买家那台服完成。
+
+需要 Python 3.10 或更高。只用标准库，不用 pip。
+
+---
 
 ## 启动
 
-需要 Python 3.10+，无额外依赖。
+在仓库的 `market-server` 目录：
 
 ```bash
-cd market-server
 python3 etherlink_market.py --name 以太货栈 --port 8765
 ```
 
-首次启动会在 `data/market.json` 写入接入令牌，并在终端打印。也可预先指定：
+第一次会：
+
+- 建立 `data/`（可用 `--data` 改路径）
+- 写下 `data/market.json`（名称、端口、令牌）
+- 在终端打印令牌
+- 使用 `data/market.sqlite` 存货单和连进来的服
+
+已经有 `market.json` 时，再启动会沿用里面的名称、端口和令牌。命令行参数会覆盖文件里的值，并写回文件。
+
+也可以自己指定令牌，或用环境变量 `ETHERLINK_TOKEN`：
 
 ```bash
 python3 etherlink_market.py --name 以太货栈 --port 8765 --token 你的令牌 --data ./data
 ```
 
-数据文件：`data/market.sqlite`。换目录即另一份市场。
+换一个数据目录就是另一份市场，货单互不可见。停进程不会丢 SQLite 里的货。
 
-## 插件接入
+监听地址默认 `0.0.0.0`。只本机试的话可以加 `--host 127.0.0.1`。多台 MC 服要连过来时，让它们能访问这台机器的端口，防火墙放行即可。前面不必加 Nginx。
 
-在 ESLink `config.yml`：
+令牌请只给要加入的服，不要提交到 git。`data/` 已在插件仓库的 `.gitignore` 里。
+
+---
+
+## 接到插件
+
+在游戏里（需要 `eslink.admin`）：
+
+```
+/link market add ether http://127.0.0.1:8765 令牌 以太货栈
+/link market default ether
+/link market
+```
+
+指令会写入 `plugins/ESLink/config.yml`，重启后还在。多台服都要登记，`url` 写成那台服能访问到的地址（另一台机器上不要写 `127.0.0.1`）。
+
+或者直接改配置：
 
 ```yaml
 markets:
@@ -33,11 +63,29 @@ markets:
       token: "与市场服务相同的令牌"
 ```
 
-或游戏内（需 `eslink.admin`）：
+大厅和市场页顶栏会显示市场名称和是否在线。玩家点击切换当前货单。未在插件里登记任何市场时，货单仍使用 MySQL。
 
-```
-/link market add ether http://127.0.0.1:8765 令牌 以太货栈
-/link market default ether
-```
+登记之后，新的上架不会写回 MySQL。如果以前货还在库里，需要重新上架，或先不登记、继续用旧货单。
 
-重启后仍保留。玩家在大厅 / 市场页点击切换当前市场。
+---
+
+## 它存什么
+
+- 连进来的服：代号、显示名、颜色、心跳
+- 货单：卖家、来源服、物品数据、价格
+
+购买是按编号把该行删掉；删失败就是已被买走，插件会把钱退给买家。
+
+浏览器打开 `http://127.0.0.1:8765/v1/info` 可以看名称和件数，不含货单内容。货单接口需要令牌。
+
+---
+
+## 参数
+
+| 参数 | 含义 |
+|---|---|
+| `--name` | 显示名，大厅里看到的就是这个 |
+| `--port` | 端口，默认 8765 |
+| `--host` | 监听地址，默认 `0.0.0.0` |
+| `--token` | 接入令牌；省略则用文件或环境变量，再没有就生成一份 |
+| `--data` | 数据目录，默认当前目录下的 `data` |
