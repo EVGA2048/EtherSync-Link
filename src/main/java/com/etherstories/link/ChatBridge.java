@@ -10,9 +10,11 @@ import org.bukkit.persistence.PersistentDataType;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
@@ -21,16 +23,26 @@ public final class ChatBridge {
     static final String MSG = "\u0001MSG\u0001";
     private final ESLinkPlugin plugin;
     private final NamespacedKey modeKey;
+    private final NamespacedKey recvKey;
     private final NamespacedKey mutePlayersKey;
     private final NamespacedKey muteServersKey;
     private final AtomicLong lastId = new AtomicLong(-1);
     private long lastPrune;
     private final Map<UUID, Deque<Long>> sentAt = new ConcurrentHashMap<>();
     private final Map<UUID, Long> lastRemind = new ConcurrentHashMap<>();
+    private final Map<UUID, Emit> pending = new ConcurrentHashMap<>();
+    private final Map<UUID, String> lastSentBody = new ConcurrentHashMap<>();
+
+    static final int PRI_ARCLIGHT = 0;
+    static final int PRI_LEGACY = 1;
+    static final int PRI_PAPER = 2;
+
+    private record Emit(String msg, ItemStack item, int pri) {}
 
     public ChatBridge(ESLinkPlugin plugin) {
         this.plugin = plugin;
         this.modeKey = new NamespacedKey(plugin, "chat");
+        this.recvKey = new NamespacedKey(plugin, "chat_recv");
         this.mutePlayersKey = new NamespacedKey(plugin, "mute_p");
         this.muteServersKey = new NamespacedKey(plugin, "mute_s");
     }
@@ -54,9 +66,9 @@ public final class ChatBridge {
     public void setAll(Player p, boolean all) {
         p.getPersistentDataContainer().set(modeKey, PersistentDataType.STRING, all ? "all" : "local");
         if (all) {
-            notice(p, "聊天将发到全部互通服。发言太快会拦截。/link chat local 改回仅本服");
+            notice(p, "发言将发往全部互通服。过快发言不会传到其他服务器。可在大厅勾选要接收的服务器。");
         } else {
-            notice(p, "聊天只在本服，不会传到其他服务器。");
+            notice(p, "发言仅本服可见，不会发往其他服务器。");
         }
     }
 
@@ -64,13 +76,94 @@ public final class ChatBridge {
         setAll(p, !isAll(p));
     }
 
+    public enum Recv { LOCAL, ALL, LIST }
+
+    public Recv recvMode(Player p) {
+        String v = p.getPersistentDataContainer().get(recvKey, PersistentDataType.STRING);
+        if (v == null || v.isBlank()) {
+            return "all".equalsIgnoreCase(plugin.getConfig().getString("chat.default", "local"))
+                    ? Recv.ALL : Recv.LOCAL;
+        }
+        if ("all".equalsIgnoreCase(v)) return Recv.ALL;
+        if ("local".equalsIgnoreCase(v) || "none".equalsIgnoreCase(v)) return Recv.LOCAL;
+        return Recv.LIST;
+    }
+
+    public Set<String> recvServers(Player p) {
+        Set<String> out = new HashSet<>();
+        String v = p.getPersistentDataContainer().get(recvKey, PersistentDataType.STRING);
+        if (v == null || v.isBlank() || "all".equalsIgnoreCase(v)
+                || "local".equalsIgnoreCase(v) || "none".equalsIgnoreCase(v)) {
+            return out;
+        }
+        for (String s : v.split(",")) {
+            if (!s.isBlank()) out.add(s.trim().toLowerCase(Locale.ROOT));
+        }
+        return out;
+    }
+
+    public boolean receives(Player p, String fromCode) {
+        if (fromCode == null) return false;
+        Recv m = recvMode(p);
+        if (m == Recv.LOCAL) return false;
+        if (m == Recv.ALL) return true;
+        return recvServers(p).contains(fromCode.toLowerCase(Locale.ROOT));
+    }
+
+    public void setRecvAll(Player p) {
+        p.getPersistentDataContainer().set(recvKey, PersistentDataType.STRING, "all");
+        notice(p, "将接收全部互通服的消息。");
+    }
+
+    public void setRecvLocal(Player p) {
+        p.getPersistentDataContainer().set(recvKey, PersistentDataType.STRING, "local");
+        notice(p, "不再接收其他服务器的互通消息。");
+    }
+
+    public void toggleRecvServer(Player p, String code) {
+        String resolved = plugin.resolveServerCode(code);
+        if (resolved.isEmpty()) {
+            notice(p, "未找到这台服务器。");
+            return;
+        }
+        String key = resolved.toLowerCase(Locale.ROOT);
+        Recv mode = recvMode(p);
+        Set<String> set = recvServers(p);
+        if (mode == Recv.ALL) {
+            for (Models.ServerRow s : plugin.cachedServers()) {
+                if (s.code() != null && !s.code().equalsIgnoreCase(plugin.serverCode())) {
+                    set.add(s.code().toLowerCase(Locale.ROOT));
+                }
+            }
+        }
+        if (set.contains(key)) set.remove(key);
+        else set.add(key);
+        if (set.isEmpty()) {
+            setRecvLocal(p);
+            return;
+        }
+        p.getPersistentDataContainer().set(recvKey, PersistentDataType.STRING, String.join(",", set));
+        boolean on = set.contains(key);
+        notice(p, on
+                ? "已接收来自「" + plugin.prettyName(resolved) + "」的消息。"
+                : "已停止接收「" + plugin.prettyName(resolved) + "」的消息。");
+    }
+
+    public String recvLabel(Player p) {
+        return switch (recvMode(p)) {
+            case ALL -> "全部互通服";
+            case LOCAL -> "不接收外服";
+            case LIST -> "已选 " + recvServers(p).size() + " 台";
+        };
+    }
+
     public void whisper(Player p, String target, String raw) {
         if (!plugin.getConfig().getBoolean("chat.enabled", true)) {
-            notice(p, "互通聊天已关闭");
+            notice(p, "互通聊天已关闭。");
             return;
         }
         if (!plugin.store().ready()) {
-            notice(p, "数据库未连接");
+            notice(p, "数据库未连接。");
             return;
         }
         String name = sanitize(target);
@@ -82,7 +175,7 @@ public final class ChatBridge {
             return;
         }
         if (name.equalsIgnoreCase(p.getName())) {
-            notice(p, "不能私聊自己");
+            notice(p, "不能向自己发送私聊。");
             return;
         }
         if (tooFast(p)) {
@@ -105,6 +198,40 @@ public final class ChatBridge {
                 plugin.getLogger().warning("私聊发送失败: " + e.getMessage());
             }
         });
+    }
+
+    /**
+     * Paper 与 Bukkit 聊天事件同一句会各来一次。Paper 签名原文优先；
+     * 同 tick 合并，避免 Youer 取消原包后 getMessage() 卡在上一句。
+     */
+    public void emitFromChat(Player p, String raw, ItemStack item, int priority) {
+        if (p == null || !plugin.getConfig().getBoolean("chat.enabled", true) || !isAll(p)) return;
+        String msg = keepColor(raw);
+        if (msg.isBlank()) return;
+        ItemStack hand = (item == null || item.getType().isAir()) ? null : item.clone();
+        pending.compute(p.getUniqueId(), (k, cur) -> {
+            String last = lastSentBody.get(k);
+            boolean incomingFresh = last == null || !msg.equals(last);
+            if (cur != null) {
+                boolean curFresh = last == null || !cur.msg().equals(last);
+                if (incomingFresh && !curFresh) return new Emit(msg, hand, priority);
+                if (curFresh && !incomingFresh) return cur;
+                if (cur.pri() > priority) return cur;
+            }
+            return new Emit(msg, hand, priority);
+        });
+        UUID id = p.getUniqueId();
+        Bukkit.getScheduler().runTask(plugin, () -> flushEmit(id));
+    }
+
+    private void flushEmit(UUID id) {
+        Emit e = pending.remove(id);
+        if (e == null) return;
+        Player p = Bukkit.getPlayer(id);
+        if (p == null || !p.isOnline()) return;
+        lastSentBody.put(id, e.msg());
+        showLocal(p, e.msg(), e.item());
+        send(p, e.msg(), e.item());
     }
 
     /** 本服显示互通聊天。必须走系统消息，不能改玩家聊天包，否则签名失败全员掉线。 */
@@ -152,8 +279,8 @@ public final class ChatBridge {
 
     private boolean tooFast(Player p) {
         long now = System.currentTimeMillis();
-        long window = Math.max(2, plugin.getConfig().getLong("chat.fast-window-seconds", 8)) * 1000L;
-        int max = Math.max(2, plugin.getConfig().getInt("chat.fast-count", 3));
+        long window = Math.max(2, plugin.getConfig().getLong("chat.fast-window-seconds", 6)) * 1000L;
+        int max = Math.max(2, plugin.getConfig().getInt("chat.fast-count", 12));
         Deque<Long> d = sentAt.computeIfAbsent(p.getUniqueId(), u -> new ArrayDeque<>());
         synchronized (d) {
             d.addLast(now);
@@ -170,7 +297,7 @@ public final class ChatBridge {
         lastRemind.put(p.getUniqueId(), now);
         Bukkit.getScheduler().runTask(plugin, () -> {
             if (!p.isOnline()) return;
-            notice(p, "你开着互通聊天，发言太快，这条没有传到其他服。/link chat local 改回仅本服");
+            notice(p, "发言过快，本条未发往其他服务器。大厅可将聊天改回仅本服。");
         });
     }
 
@@ -193,7 +320,7 @@ public final class ChatBridge {
             return;
         }
         addCsv(p, mutePlayersKey, name.toLowerCase(Locale.ROOT));
-        notice(p, "已屏蔽 " + name + " 的互通消息。/link unignore player " + name);
+        notice(p, "已屏蔽 " + name + " 的互通消息。可用 /link unignore player " + name + " 取消。");
     }
 
     public void ignoreServer(Player p, String code) {
@@ -203,19 +330,19 @@ public final class ChatBridge {
             return;
         }
         addCsv(p, muteServersKey, resolved.toLowerCase(Locale.ROOT));
-        notice(p, "已屏蔽 " + plugin.prettyName(resolved) + " 的互通消息。/link unignore server " + resolved);
+        notice(p, "已屏蔽来自「" + plugin.prettyName(resolved) + "」的互通消息。可用 /link unignore server " + resolved + " 取消。");
     }
 
     public void unignorePlayer(Player p, String name) {
         name = sanitize(name);
         removeCsv(p, mutePlayersKey, name.toLowerCase(Locale.ROOT));
-        notice(p, "已取消屏蔽 " + name + "。");
+        notice(p, "已取消对 " + name + " 的屏蔽。");
     }
 
     public void unignoreServer(Player p, String code) {
         String resolved = plugin.resolveServerCode(code);
         removeCsv(p, muteServersKey, resolved.toLowerCase(Locale.ROOT));
-        notice(p, "已取消屏蔽 " + plugin.prettyName(resolved) + "。");
+        notice(p, "已取消对「" + plugin.prettyName(resolved) + "」的屏蔽。");
     }
 
     public void unignoreAll(Player p) {
@@ -228,7 +355,7 @@ public final class ChatBridge {
         List<String> pl = csv(p, mutePlayersKey);
         List<String> sv = csv(p, muteServersKey);
         if (pl.isEmpty() && sv.isEmpty()) {
-            notice(p, "没有屏蔽任何人。点外服消息的名字或 [屏蔽] 即可屏蔽。");
+            notice(p, "当前没有屏蔽。可在大厅聊天页勾选要接收的服务器。");
             return;
         }
         StringBuilder sb = new StringBuilder("当前屏蔽: ");
@@ -302,6 +429,7 @@ public final class ChatBridge {
         String console = strip(ColorUtil.colorize(line));
         for (Player p : Bukkit.getOnlinePlayers()) {
             if (mutedServer(p, code) || mutedPlayer(p, pname)) continue;
+            if (!receives(p, code)) continue;
             ChatMsg.tell(p, line);
         }
         Bukkit.getConsoleSender().sendMessage(console);

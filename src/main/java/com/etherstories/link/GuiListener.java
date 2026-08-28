@@ -160,10 +160,32 @@ public final class GuiListener implements Listener {
             }
             case "node-logic" -> cycleIoLogic(p, (int) Items.id(plugin, stack));
             case "guide" -> GuideBook.open(plugin, p);
-            case "chat" -> {
-                plugin.chat().toggle(p);
-                plugin.gui().openHome(p);
+            case "chat" -> plugin.gui().openChat(p);
+            case "chat-send" -> {
+                plugin.chat().setAll(p, "all".equalsIgnoreCase(Items.data(plugin, stack)));
+                plugin.gui().openChat(p);
             }
+            case "chat-recv" -> {
+                if ("all".equalsIgnoreCase(Items.data(plugin, stack))) plugin.chat().setRecvAll(p);
+                else plugin.chat().setRecvLocal(p);
+                plugin.gui().openChat(p);
+            }
+            case "chat-srv" -> {
+                plugin.chat().toggleRecvServer(p, Items.data(plugin, stack));
+                plugin.gui().openChat(p);
+            }
+            case "pick-market" -> {
+                String id = Items.data(plugin, stack);
+                if (!plugin.markets().select(p, id)) {
+                    plugin.msg(p, "无法切换到该市场。");
+                    return;
+                }
+                plugin.msg(p, "已切换至「" + plugin.markets().selectedName(p) + "」。");
+                st.marketPage = 0;
+                st.serverFilter = null;
+                plugin.gui().openMarket(p);
+            }
+            case "filter-cycle" -> plugin.gui().cycleMarketFilter(p);
             case "list-alert" -> {
                 plugin.toggleListingAlert(p);
                 plugin.gui().openHome(p);
@@ -234,7 +256,7 @@ public final class GuiListener implements Listener {
                 st.awaitingSearch = true;
                 st.awaitingPrice = false;
                 p.closeInventory();
-                plugin.msg(p, "在聊天栏输入要搜的物品名，回车后回到市场。输入 cancel 取消。");
+                plugin.msg(p, "请在聊天栏输入要搜索的物品名，回车后返回市场。输入 cancel 取消。");
             }
             case "search-clear" -> {
                 st.query = "";
@@ -432,9 +454,9 @@ public final class GuiListener implements Listener {
         }
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
             try {
-                int n = plugin.store().deleteListingsOf(plugin.serverCode(), u);
+                int n = plugin.markets().deleteOf(p, plugin.serverCode(), u);
                 Bukkit.getScheduler().runTask(plugin, () -> {
-                    plugin.msg(p, "&c已下架 " + n + " 件（本服）");
+                    plugin.msg(p, "已下架 " + n + " 件（当前市场、本服来源）。");
                     plugin.gui().openSeller(p, u);
                 });
             } catch (Exception e) {

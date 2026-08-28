@@ -24,13 +24,16 @@ public final class LinkGui {
         async(() -> {
             List<Models.ServerRow> servers;
             try {
-                servers = plugin.store().servers();
+                servers = plugin.store().ready() ? plugin.store().servers() : List.of();
             } catch (Exception e) {
-                sync(() -> plugin.msg(p, "&c读服务器失败: " + e.getMessage()));
+                sync(() -> plugin.msg(p, "无法读取服务器列表：" + e.getMessage()));
                 return;
             }
             List<Models.ServerRow> sv = servers;
             plugin.rememberServers(sv);
+            List<MarketHub> hubs = plugin.markets().hubs();
+            String marketName = plugin.markets().selectedName(p);
+            MarketHub cur = plugin.markets().selected(p);
             sync(() -> {
                 if (!p.isOnline()) return;
                 LinkHolder h = new LinkHolder("home");
@@ -38,56 +41,78 @@ public final class LinkGui {
                 h.inv = inv;
                 fillGlass(inv);
                 int slot = 0;
-                for (Models.ServerRow s : sv) {
-                    if (slot > 8) break;
-                    boolean on = s.online(plugin.offlineMs());
-                    String title = ESLinkPlugin.prettyName(s.code(), s.name());
-                    ItemStack icon = Items.serverMark(s, on, (on ? "&a" : "&8") + title,
-                            serverLore(s, on, "点击查看该服市场上的货物"));
-                    inv.setItem(slot++, tag("filter", s.code(), 0, icon));
+                if (!hubs.isEmpty()) {
+                    for (MarketHub m : hubs) {
+                        if (slot > 8) break;
+                        boolean sel = cur != null && m.id.equals(cur.id);
+                        boolean on = m.online;
+                        List<String> lore = new ArrayList<>();
+                        lore.add(on ? "&a在线" : "&8离线");
+                        lore.add("&7" + m.url);
+                        lore.add(sel ? "&a当前市场" : "&8点击切换并打开货单");
+                        inv.setItem(slot++, tag("pick-market", m.id, 0, Items.named(
+                                on ? Material.ENDER_CHEST : Material.CHEST,
+                                (sel ? "&e" : (on ? "&a" : "&8")) + m.displayName(),
+                                lore)));
+                    }
+                } else {
+                    for (Models.ServerRow s : sv) {
+                        if (slot > 8) break;
+                        boolean on = s.online(plugin.offlineMs());
+                        String title = ESLinkPlugin.prettyName(s.code(), s.name());
+                        ItemStack icon = Items.serverMark(s, on, (on ? "&a" : "&8") + title,
+                                serverLore(s, on, "查看该服货单"));
+                        inv.setItem(slot++, tag("filter", s.code(), 0, icon));
+                    }
                 }
-                inv.setItem(20, tag("market", "", 0, Items.named(Material.CHEST, "&e跨服市场",
-                        List.of("&7各服玩家上架的货物", "&8左键打开"))));
-                inv.setItem(22, tag("sell", "", 0, Items.named(Material.EMERALD, "&a上架手里的货",
-                        List.of("&7把主手里的物品放到跨服市场", "&8点一下后，在聊天栏输入单价"))));
+                List<String> marketLore = new ArrayList<>();
+                marketLore.add("&7当前市场 &f" + marketName);
+                if (cur != null) marketLore.add(cur.online ? "&a已连接" : "&8未连接");
+                else if (!plugin.markets().httpEnabled()) marketLore.add("&7使用本服 MySQL 货单");
+                marketLore.add("&8点击打开");
+                inv.setItem(20, tag("market", "", 0, Items.named(Material.CHEST, "&e跨服市场", marketLore)));
+                inv.setItem(22, tag("sell", "", 0, Items.named(Material.EMERALD, "&a上架主手物品",
+                        List.of("&7将主手物品上架到当前市场", "&8随后在聊天栏输入单价"))));
                 inv.setItem(24, tag("mine", "", 0, Items.named(Material.ENDER_CHEST, "&b我的上架",
-                        List.of("&7正在卖的货", "&8下架后物品退回背包"))));
+                        List.of("&7当前市场中你正在出售的物品", "&8下架后物品退回背包"))));
                 inv.setItem(29, tag("io", "", 0, Items.named(Material.REDSTONE_LAMP, "&c跨服红石",
-                        List.of("&7看准红石灯后点这里，或输入",
+                        List.of("&7对准红石灯后点这里，或输入",
                                 "&f/link io",
-                                "&7灯亮=在线；离线变灰、故障变红",
-                                "&8接收灯本身输出 0–15"))));
+                                "&7约 5 格，对准灯本身",
+                                "&7灯亮为在线；离线变灰、故障变红",
+                                "&8接收灯输出 0–15"))));
                 inv.setItem(31, tag("help", "", 0, Items.named(Material.OAK_SIGN, "&f跨服运输箱",
-                        List.of("&7看准箱子后点这里，或输入",
+                        List.of("&7对准箱子后点这里，或输入",
                                 "&f/link chest",
-                                "&7中文: /link 互通箱",
-                                "&7登记 TX / RX，自动贴牌",
-                                "&8TX 与 RX 勿用漏斗对连"))));
+                                "&7登记 TX / RX，并自动贴牌",
+                                "&8请勿用漏斗将 TX 与 RX 对连"))));
+                boolean sendAll = plugin.chat().isAll(p);
                 inv.setItem(33, tag("chat", "", 0, Items.named(
-                        plugin.chat().isAll(p) ? Material.GOAT_HORN : Material.PAPER,
-                        plugin.chat().isAll(p) ? "&a聊天: 全部互通服" : "&f聊天: 仅本服",
-                        List.of("&7点一下切换你说话发到哪里",
-                                "&7外服消息可以点名字屏蔽",
-                                "&7开着全部时，说太快不会传到对面",
-                                "&8/link chat"))));
+                        sendAll ? Material.GOAT_HORN : Material.PAPER,
+                        sendAll ? "&a聊天：发往全部互通服" : "&f聊天：仅本服",
+                        List.of("&7接收 &f" + plugin.chat().recvLabel(p),
+                                "&8点击打开选台"))));
                 inv.setItem(35, tag("mynodes", "", 0, Items.named(Material.COMPASS, "&b我的节点",
                         List.of("&7你登记过的互通箱 / 红石",
-                                "&7左键看坐标（本服会指指南针）",
+                                "&7左键查看坐标（本服会指向指南针）",
                                 "&8右键开关消息"))));
                 inv.setItem(37, tag("list-alert", "", 0, Items.named(
                         plugin.wantListingAlert(p) ? Material.LIME_DYE : Material.GRAY_DYE,
-                        plugin.wantListingAlert(p) ? "&a上架通知: 开" : "&7上架通知: 关",
-                        List.of("&7默认关闭，只影响你自己",
-                                "&7开了才会收到本服/外服上架广播",
-                                "&8点一下切换"))));
+                        plugin.wantListingAlert(p) ? "&a上架通知：开" : "&7上架通知：关",
+                        List.of("&7默认关闭，仅影响你自己",
+                                "&7开启后接收本服与外服上架广播",
+                                "&8点击切换"))));
                 inv.setItem(38, tag("watches", "", 0, Items.named(Material.BELL, "&e节点消息",
                         List.of("&7你订阅过的互通箱 / 红石",
-                                "&7出问题会私聊你",
-                                "&8点开可关掉"))));
+                                "&7出现问题时会私聊通知你",
+                                "&8点击管理"))));
                 if (p.hasPermission("eslink.admin")) {
                     inv.setItem(40, tag("settings", "", 0, Items.named(Material.COMPARATOR, "&c互通设置",
                             List.of("&7通知、标识颜色、交易税",
-                                    plugin.isSuper(p) ? "&e超级管理可删除错误服务器" : "&8本服管理",
+                                    plugin.isSuper(p) ? "&e超级管理可删除错误服务器记录" : "&8本服管理",
+                                    plugin.markets().httpEnabled()
+                                            ? "&7当前市场 &f" + plugin.markets().selectedName(p)
+                                            : "&8未登记独立市场",
                                     "&8卖家主页仍可禁止上架"))));
                 }
                 boolean first = !plugin.guideWelcomed(p);
@@ -95,7 +120,7 @@ public final class LinkGui {
                 p.openInventory(inv);
                 if (first) {
                     plugin.markGuideWelcomed(p);
-                    plugin.msg(p, "第一次来？点大厅下面那本 &e说明书 &f，或输入 /link help");
+                    plugin.msg(p, "欢迎使用互通大厅。可打开下方说明书，或输入 /link help。");
                 }
             });
         });
@@ -104,62 +129,146 @@ public final class LinkGui {
     public void openMarket(Player p) {
         Sessions.State st = plugin.sessions().of(p);
         st.page = Sessions.Page.MARKET;
+        String blocked = plugin.markets().requireReady(p);
+        if (blocked != null) {
+            plugin.msg(p, blocked);
+            return;
+        }
         async(() -> {
             List<Models.ServerRow> servers;
             List<Models.Listing> rows;
             try {
-                servers = plugin.store().servers();
-                rows = plugin.store().listings(st.serverFilter, st.query, null, st.marketPage * PAGE, PAGE);
+                servers = plugin.markets().servers(p);
+                rows = plugin.markets().listings(p, st.serverFilter, st.query, null, st.marketPage * PAGE, PAGE);
             } catch (Exception e) {
-                sync(() -> plugin.msg(p, "&c读市场失败: " + e.getMessage()));
+                sync(() -> plugin.msg(p, "无法读取市场：" + e.getMessage()));
                 return;
             }
             List<Models.ServerRow> sv = servers;
             List<Models.Listing> ls = rows;
-            plugin.rememberServers(sv);
+            List<MarketHub> hubs = plugin.markets().hubs();
+            MarketHub cur = plugin.markets().selected(p);
+            String titleName = plugin.markets().selectedName(p);
             sync(() -> {
                 if (!p.isOnline()) return;
                 LinkHolder h = new LinkHolder("market");
-                Inventory inv = Bukkit.createInventory(h, 54, ColorUtil.colorize("&e&l跨服市场"));
+                Inventory inv = Bukkit.createInventory(h, 54, ColorUtil.colorize("&e&l" + titleName));
                 h.inv = inv;
                 String qShow = (st.query == null || st.query.isBlank()) ? "（全部）" : st.query;
                 String filterShow = st.serverFilter == null ? "全部服务器" : plugin.prettyName(st.serverFilter);
                 for (int i = 0; i < 54; i++) inv.setItem(i, pane());
                 inv.setItem(0, tag("search", "", 0, Items.named(Material.COMPASS, "&b搜索",
-                        List.of("&7点一下，关掉界面后在聊天栏打物品名", "&7回车回到这个界面", "&8输入 cancel 取消"))));
-                inv.setItem(1, Items.named(Material.NAME_TAG, "&f当前搜索: &e" + qShow,
-                        List.of("&7范围: &f" + filterShow, "&8只是显示，点了没反应")));
+                        List.of("&7关闭界面后，在聊天栏输入物品名", "&7回车返回本页", "&8输入 cancel 取消"))));
+                inv.setItem(1, Items.named(Material.NAME_TAG, "&f搜索：&e" + qShow,
+                        List.of("&7范围：&f" + filterShow, "&8仅显示，点击无效")));
                 if (st.query != null && !st.query.isBlank()) {
                     inv.setItem(2, tag("search-clear", "", 0, Items.named(Material.BARRIER, "&c清除搜索",
-                            List.of("&7回到全部货物"))));
+                            List.of("&7显示全部货物"))));
                 }
-                inv.setItem(3, tag("filter", "", 0, Items.named(Material.CHEST,
-                        (st.serverFilter == null ? "&a" : "&7") + "全部服务器", List.of("&8不过滤，看所有服"))));
-                int sSlot = 4;
-                for (Models.ServerRow s : sv) {
-                    if (sSlot > 8) break;
-                    boolean sel = s.code().equals(st.serverFilter);
-                    boolean on = s.online(plugin.offlineMs());
-                    String title = ESLinkPlugin.prettyName(s.code(), s.name());
-                    inv.setItem(sSlot++, tag("filter", s.code(), 0, Items.serverMark(s, on,
-                            (sel ? "&e" : (on ? "&a" : "&8")) + title,
-                            serverLore(s, on, "点击只看该服的货"))));
+                int sSlot = 3;
+                if (!hubs.isEmpty()) {
+                    for (MarketHub m : hubs) {
+                        if (sSlot > 8) break;
+                        boolean sel = cur != null && m.id.equals(cur.id);
+                        inv.setItem(sSlot++, tag("pick-market", m.id, 0, Items.named(
+                                m.online ? Material.ENDER_CHEST : Material.CHEST,
+                                (sel ? "&e" : (m.online ? "&a" : "&8")) + m.displayName(),
+                                List.of(m.online ? "&a在线" : "&8离线",
+                                        sel ? "&a当前市场" : "&8点击切换"))));
+                    }
+                } else {
+                    inv.setItem(3, tag("filter", "", 0, Items.named(Material.CHEST,
+                            (st.serverFilter == null ? "&a" : "&7") + "全部服务器", List.of("&8不筛选来源服"))));
+                    sSlot = 4;
+                    for (Models.ServerRow s : sv) {
+                        if (sSlot > 8) break;
+                        boolean sel = s.code().equals(st.serverFilter);
+                        boolean on = s.online(plugin.offlineMs());
+                        String title = ESLinkPlugin.prettyName(s.code(), s.name());
+                        inv.setItem(sSlot++, tag("filter", s.code(), 0, Items.serverMark(s, on,
+                                (sel ? "&e" : (on ? "&a" : "&8")) + title,
+                                serverLore(s, on, "只看该服货物"))));
+                    }
                 }
 
                 for (int i = 0; i < PAGE; i++) {
-                    if (i < ls.size()) inv.setItem(9 + i, listingIcon(ls.get(i), "&8左键购买  右键看卖家"));
+                    if (i < ls.size()) inv.setItem(9 + i, listingIcon(ls.get(i), buyHint(ls.get(i), p)));
                 }
                 inv.setItem(45, tag("page", "prev", 0, Items.named(Material.ARROW, "&f上一页",
-                        List.of("&8看更早的货"))));
+                        List.of("&8更早的货物"))));
                 inv.setItem(46, Items.named(Material.PAPER, "&f第 " + (st.marketPage + 1) + " 页",
                         List.of("&7本页 " + ls.size() + " 件")));
                 inv.setItem(47, tag("page", "next", 0, Items.named(Material.ARROW, "&f下一页",
-                        List.of("&8看更多"))));
+                        List.of("&8更多货物"))));
+                if (!hubs.isEmpty() && !sv.isEmpty()) {
+                    inv.setItem(48, tag("filter-cycle", "", 0,
+                            Items.named(Material.HOPPER, "&f来源：&e" + filterShow,
+                                    List.of("&8点击在加入此市场的服务器之间切换"))));
+                }
                 inv.setItem(49, tag("home", "", 0, Items.named(Material.OAK_DOOR, "&7返回大厅", null)));
                 inv.setItem(50, tag("sell", "", 0, Items.named(Material.EMERALD, "&a上架",
-                        List.of("&7主手拿着货再点"))));
+                        List.of("&7主手持有物品后再点"))));
                 inv.setItem(51, tag("mine", "", 0, Items.named(Material.ENDER_CHEST, "&b我的上架",
-                        List.of("&7下架退回背包"))));
+                        List.of("&7下架后物品退回背包"))));
+                p.openInventory(inv);
+            });
+        });
+    }
+
+    public void openChat(Player p) {
+        Sessions.State st = plugin.sessions().of(p);
+        st.page = Sessions.Page.CHAT;
+        async(() -> {
+            List<Models.ServerRow> servers;
+            try {
+                servers = plugin.store().ready() ? plugin.store().servers() : List.of();
+            } catch (Exception e) {
+                sync(() -> plugin.msg(p, "无法读取服务器列表。"));
+                return;
+            }
+            List<Models.ServerRow> sv = servers;
+            plugin.rememberServers(sv);
+            sync(() -> {
+                if (!p.isOnline()) return;
+                LinkHolder h = new LinkHolder("chat");
+                Inventory inv = Bukkit.createInventory(h, 54, ColorUtil.colorize("&b&l互通聊天"));
+                h.inv = inv;
+                fillGlass(inv);
+                boolean sendAll = plugin.chat().isAll(p);
+                ChatBridge.Recv recv = plugin.chat().recvMode(p);
+                inv.setItem(10, tag("chat-send", "local", 0, Items.named(
+                        sendAll ? Material.PAPER : Material.LIME_DYE,
+                        sendAll ? "&7发言：仅本服" : "&a发言：仅本服",
+                        List.of("&7消息不会发往其他服务器", "&8点击选用"))));
+                inv.setItem(11, tag("chat-send", "all", 0, Items.named(
+                        sendAll ? Material.LIME_DYE : Material.GOAT_HORN,
+                        sendAll ? "&a发言：全部互通服" : "&7发言：全部互通服",
+                        List.of("&7消息发往已加入聊天网的服务器", "&7过快发言不会传到其他服务器", "&8点击选用"))));
+                inv.setItem(13, tag("chat-recv", "local", 0, Items.named(
+                        recv == ChatBridge.Recv.LOCAL ? Material.LIME_DYE : Material.GRAY_DYE,
+                        recv == ChatBridge.Recv.LOCAL ? "&a接收：不接收外服" : "&7接收：不接收外服",
+                        List.of("&7只看本服聊天", "&8点击选用"))));
+                inv.setItem(14, tag("chat-recv", "all", 0, Items.named(
+                        recv == ChatBridge.Recv.ALL ? Material.LIME_DYE : Material.GRAY_DYE,
+                        recv == ChatBridge.Recv.ALL ? "&a接收：全部互通服" : "&7接收：全部互通服",
+                        List.of("&7接收聊天网上的全部服务器", "&8点击选用"))));
+                inv.setItem(16, Items.named(Material.NAME_TAG, "&f当前",
+                        List.of("&7发言 &f" + (sendAll ? "全部互通服" : "仅本服"),
+                                "&7接收 &f" + plugin.chat().recvLabel(p))));
+                int slot = 27;
+                for (Models.ServerRow s : sv) {
+                    if (s.code() != null && s.code().equalsIgnoreCase(plugin.serverCode())) continue;
+                    if (slot >= 45) break;
+                    boolean on = s.online(plugin.offlineMs());
+                    boolean sel = recv == ChatBridge.Recv.ALL
+                            || (recv == ChatBridge.Recv.LIST && plugin.chat().recvServers(p)
+                            .contains(s.code().toLowerCase(java.util.Locale.ROOT)));
+                    String title = ESLinkPlugin.prettyName(s.code(), s.name());
+                    List<String> lore = serverLore(s, on, sel ? "点击停止接收" : "点击接收该服消息");
+                    inv.setItem(slot++, tag("chat-srv", s.code(), 0, Items.serverMark(s, on,
+                            (sel ? "&e" : (on ? "&a" : "&8")) + title, lore)));
+                }
+                inv.setItem(49, tag("home", "", 0, Items.named(Material.OAK_DOOR, "&7返回大厅", null)));
                 p.openInventory(inv);
             });
         });
@@ -171,9 +280,9 @@ public final class LinkGui {
         async(() -> {
             List<Models.Listing> rows;
             try {
-                rows = plugin.store().listings(null, null, p.getUniqueId(), 0, PAGE);
+                rows = plugin.markets().listings(p, null, null, p.getUniqueId(), 0, PAGE);
             } catch (Exception e) {
-                sync(() -> plugin.msg(p, "&c读取失败: " + e.getMessage()));
+                sync(() -> plugin.msg(p, "无法读取货单：" + e.getMessage()));
                 return;
             }
             List<Models.Listing> ls = rows;
@@ -199,9 +308,9 @@ public final class LinkGui {
         async(() -> {
             List<Models.Listing> rows;
             try {
-                rows = plugin.store().listings(null, null, seller, 0, PAGE);
+                rows = plugin.markets().listings(p, null, null, seller, 0, PAGE);
             } catch (Exception e) {
-                sync(() -> plugin.msg(p, "&c读取失败: " + e.getMessage()));
+                sync(() -> plugin.msg(p, "无法读取货单：" + e.getMessage()));
                 return;
             }
             List<Models.Listing> ls = rows;
@@ -221,7 +330,7 @@ public final class LinkGui {
                 if (p.hasPermission("eslink.admin")) headLore.add("&8" + seller);
                 inv.setItem(4, tag("noop", "", 0, Items.playerHead(seller, "&f" + name, headLore)));
                 for (int i = 0; i < ls.size() && i < 36; i++) {
-                    inv.setItem(9 + i, listingIcon(ls.get(i), "&8左键购买  右键看卖家"));
+                    inv.setItem(9 + i, listingIcon(ls.get(i), buyHint(ls.get(i), p)));
                 }
                 inv.setItem(45, tag("market", "", 0, Items.named(Material.ARROW, "&7返回市场", null)));
                 if (p.hasPermission("eslink.admin") && local) {
@@ -244,16 +353,16 @@ public final class LinkGui {
         async(() -> {
             Models.Listing row;
             try {
-                row = plugin.store().listing(listingId);
+                row = plugin.markets().listing(p, listingId);
             } catch (Exception e) {
-                sync(() -> plugin.msg(p, "&c读取失败"));
+                sync(() -> plugin.msg(p, "无法读取货单。"));
                 return;
             }
             Models.Listing L = row;
             sync(() -> {
                 if (!p.isOnline()) return;
                 if (L == null) {
-                    plugin.msg(p, "&c这件货没了");
+                    plugin.msg(p, "这件货物已经不在市场上。");
                     openMarket(p);
                     return;
                 }
@@ -261,11 +370,11 @@ public final class LinkGui {
                 Inventory inv = Bukkit.createInventory(h, 27, ColorUtil.colorize("&6&l确认购买"));
                 h.inv = inv;
                 fillGlass(inv);
-                inv.setItem(13, listingIcon(L, "&7确认要买的就是这件"));
+                inv.setItem(13, listingIcon(L, "&7请确认物品与价格"));
                 boolean vault = plugin.vault().ok();
-                String bal = vault ? plugin.vault().format(plugin.vault().bal(p)) : "本服没有经济插件";
+                String bal = vault ? plugin.vault().format(plugin.vault().bal(p)) : "本服未接入经济";
                 inv.setItem(11, tag("buy-no", "", 0, Items.named(Material.RED_CONCRETE, "&c取消",
-                        List.of("&8回到市场"))));
+                        List.of("&8返回市场"))));
                 double tax = plugin.taxOf(L.price());
                 List<String> buyLore = new ArrayList<>();
                 buyLore.add("&7价格 &f" + (vault ? plugin.vault().format(L.price()) : String.valueOf(L.price())));
@@ -273,10 +382,29 @@ public final class LinkGui {
                     buyLore.add("&7互通税 &e" + plugin.vault().format(tax) + " &8(" + plugin.taxRateText() + ")");
                     buyLore.add("&7实付 &c" + plugin.vault().format(L.price() + tax));
                 }
-                buyLore.add("&7你的余额 &f" + bal);
+                buyLore.add("&7余额 &f" + bal);
                 buyLore.add("&7卖家 &f" + L.sellerName());
                 buyLore.add("&7来自 &f" + plugin.prettyName(L.serverCode()));
-                inv.setItem(15, tag("buy-yes", "", L.id(), Items.named(Material.LIME_CONCRETE, "&a确认购买", buyLore)));
+                boolean self = plugin.selfListing(L, p);
+                boolean local = plugin.localListing(L);
+                if (self && local) {
+                    inv.setItem(15, tag("buy-no", "", 0, Items.named(Material.BARRIER, "&c这是你在本服上架的物品",
+                            List.of("&7请打开「我的上架」并下架", "&8不必购买"))));
+                } else if (self) {
+                    if (!plugin.selfBuyEnabled()) {
+                        inv.setItem(15, tag("buy-no", "", 0, Items.named(Material.BARRIER, "&c本服未开放跨服取回",
+                                List.of("&7请到上架所在服务器下架"))));
+                    } else {
+                        double fee = plugin.selfBuyFee(L.price());
+                        String feeTxt = vault ? plugin.vault().format(fee) : String.valueOf(fee);
+                        buyLore.add("&e跨服取回：货款不会打入你的账户");
+                        buyLore.add("&7费用 &c" + feeTxt);
+                        inv.setItem(15, tag("buy-yes", "", L.id(),
+                                Items.named(Material.LIME_CONCRETE, "&a确认取回", buyLore)));
+                    }
+                } else {
+                    inv.setItem(15, tag("buy-yes", "", L.id(), Items.named(Material.LIME_CONCRETE, "&a确认购买", buyLore)));
+                }
                 p.openInventory(inv);
             });
         });
@@ -528,15 +656,20 @@ public final class LinkGui {
         }
         ItemStack hand = p.getInventory().getItemInMainHand();
         if (hand == null || hand.getType().isAir()) {
-            plugin.msg(p, "&c主手拿着要上架的物品");
+            plugin.msg(p, "请先将要上架的物品拿在主手。");
             return;
         }
         if (!plugin.tradeEnabled()) {
-            plugin.msg(p, "&c本服已关闭互通交易");
+            plugin.msg(p, "本服已关闭互通交易。");
+            return;
+        }
+        String blocked = plugin.markets().requireReady(p);
+        if (blocked != null) {
+            plugin.msg(p, blocked);
             return;
         }
         if (!plugin.allowed(hand)) {
-            plugin.msg(p, "&c不在互通白名单: " + Items.itemKey(hand));
+            plugin.msg(p, "该物品不在互通白名单中：" + Items.itemKey(hand));
             return;
         }
         Sessions.State st = plugin.sessions().of(p);
@@ -546,7 +679,7 @@ public final class LinkGui {
         st.awaitingSearch = false;
         st.repriceId = 0;
         p.closeInventory();
-        plugin.msg(p, "在聊天栏输入单价（数字），或输入 cancel 取消。数量=" + st.listAmount);
+        plugin.msg(p, "请在聊天栏输入单价（数字），或输入 cancel 取消。数量 " + st.listAmount + "。");
     }
 
     public void finishSell(Player p, double price) {
@@ -555,16 +688,16 @@ public final class LinkGui {
         st.awaitingPrice = false;
         st.listItem = null;
         if (item == null) {
-            plugin.msg(p, "&c没有待上架物品");
+            plugin.msg(p, "没有待上架的物品。");
             return;
         }
         if (price < 0) {
-            plugin.msg(p, "&c价格无效");
+            plugin.msg(p, "价格无效。");
             return;
         }
         ItemStack hand = p.getInventory().getItemInMainHand();
         if (hand == null || !hand.isSimilar(item) || hand.getAmount() < st.listAmount) {
-            plugin.msg(p, "&c主手物品对不上了，取消");
+            plugin.msg(p, "主手物品已变化，已取消上架。");
             return;
         }
         ItemStack take = hand.clone();
@@ -576,17 +709,17 @@ public final class LinkGui {
         int amt = st.listAmount;
         async(() -> {
             try {
-                plugin.store().insertListing(p.getUniqueId(), p.getName(), plugin.serverCode(),
+                plugin.markets().insert(p, p.getUniqueId(), p.getName(), plugin.serverCode(),
                         key, name, amt, price, b64, NestedItems.csv(take));
                 sync(() -> {
                     plugin.alerts().listingLocal(p, name, amt, price);
-                    plugin.msg(p, "&a已上架 " + name + " x" + amt);
+                    plugin.msg(p, "已上架 " + name + " ×" + amt + " 至「" + plugin.markets().selectedName(p) + "」。");
                     openMine(p);
                 });
             } catch (Exception e) {
                 sync(() -> {
                     p.getInventory().addItem(take);
-                    plugin.msg(p, "&c上架失败，已退回: " + e.getMessage());
+                    plugin.msg(p, "上架失败，物品已退回。" + e.getMessage());
                 });
             }
         });
@@ -596,70 +729,95 @@ public final class LinkGui {
         async(() -> {
             Models.Listing L;
             try {
-                L = plugin.store().listing(id);
+                L = plugin.markets().listing(p, id);
             } catch (Exception e) {
-                sync(() -> plugin.msg(p, "&c读取失败"));
+                sync(() -> plugin.msg(p, "无法读取货单。"));
                 return;
             }
             if (L == null) {
-                sync(() -> plugin.msg(p, "&c货没了"));
+                sync(() -> plugin.msg(p, "这件货物已经不在市场上。"));
                 return;
             }
-            if (L.seller().equals(p.getUniqueId())) {
-                sync(() -> plugin.msg(p, "&c那是你自己上架的"));
+            if (L.seller().equals(p.getUniqueId()) && plugin.localListing(L)) {
+                sync(() -> plugin.msg(p, "这是你在本服上架的物品。请打开「我的上架」并下架。"));
                 return;
             }
+            if (L.seller().equals(p.getUniqueId()) && !plugin.selfBuyEnabled()) {
+                sync(() -> plugin.msg(p, "本服未开放跨服取回。请到上架所在服务器下架。"));
+                return;
+            }
+            boolean selfRemote = L.seller().equals(p.getUniqueId());
             Models.Listing row = L;
             sync(() -> {
                 if (!plugin.tradeEnabled()) {
-                    plugin.msg(p, "&c本服已关闭互通交易");
+                    plugin.msg(p, "本服已关闭互通交易。");
                     return;
                 }
                 if (!ItemCodec.known(row.blob(), row.itemKey(), row.nestedKeys())) {
-                    plugin.msg(p, "&c本服没有此物品，买不了（" + row.itemKey() + "）");
+                    plugin.msg(p, "本服无法识别该物品，无法购买（" + row.itemKey() + "）。");
                     return;
                 }
+                if (selfRemote) {
+                    String gate = plugin.selfBuyGate(p);
+                    if (gate != null) {
+                        plugin.msg(p, gate);
+                        return;
+                    }
+                }
                 double tax = plugin.taxOf(row.price());
-                double pay = row.price() + tax;
+                double pay = selfRemote ? plugin.selfBuyFee(row.price()) : row.price() + tax;
                 if (pay > 0) {
                     if (!plugin.vault().ok()) {
-                        plugin.msg(p, "&c本服没有 Vault 经济，买不了标价货");
+                        plugin.msg(p, "本服未接入经济，无法购买标价物品。");
                         return;
                     }
                     String err = plugin.vault().withdraw(p, pay);
                     if (err != null) {
-                        plugin.msg(p, "&c" + err);
+                        plugin.msg(p, err);
                         return;
                     }
                 }
                 async(() -> {
+                    Models.Listing claimed;
                     try {
-                        if (!plugin.store().deleteListing(row.id())) {
+                        claimed = plugin.markets().claim(p, row.id());
+                        if (claimed == null) {
                             sync(() -> {
                                 if (pay > 0 && plugin.vault().ok()) plugin.vault().deposit(p, pay);
-                                plugin.msg(p, "&c被人买走了，已退款");
+                                plugin.msg(p, "货物已被取走，费用已退回。");
                             });
                             return;
                         }
                     } catch (Exception e) {
                         sync(() -> {
                             if (pay > 0 && plugin.vault().ok()) plugin.vault().deposit(p, pay);
-                            plugin.msg(p, "&c结算失败，已退款");
+                            plugin.msg(p, "结算失败，费用已退回。");
                         });
                         return;
                     }
+                    Models.Listing got = claimed;
                     sync(() -> {
-                        if (row.price() > 0 && plugin.vault().ok()) {
-                            plugin.vault().deposit(Bukkit.getOfflinePlayer(row.seller()), row.price());
+                        if (selfRemote) {
+                            plugin.selfBuyMark(p);
+                            if (pay > 0) plugin.depositTax(pay);
+                        } else {
+                            if (got.price() > 0 && plugin.vault().ok()) {
+                                plugin.vault().deposit(Bukkit.getOfflinePlayer(got.seller()), got.price());
+                            }
+                            if (tax > 0) plugin.depositTax(tax);
                         }
-                        if (tax > 0) plugin.depositTax(tax);
-                        ItemStack give = ItemCodec.decode(row.blob(), row.itemKey(), row.amount(), row.nestedKeys());
+                        ItemStack give = ItemCodec.decode(got.blob(), got.itemKey(), got.amount(), got.nestedKeys());
                         var leftover = p.getInventory().addItem(give);
                         boolean dropped = !leftover.isEmpty();
                         leftover.values().forEach(it -> p.getWorld().dropItemNaturally(p.getLocation(), it));
-                        plugin.msg(p, "&a买到 " + row.itemName() + " x" + row.amount()
-                                + (tax > 0 ? " &7(含税 " + plugin.vault().format(tax) + ")" : ""));
-                        if (dropped) plugin.msg(p, "&e背包满了，多的掉在脚下");
+                        if (selfRemote) {
+                            plugin.msg(p, "已从外服取回 " + got.itemName() + " ×" + got.amount()
+                                    + (pay > 0 ? "（费用 " + plugin.vault().format(pay) + "）" : "") + "。");
+                        } else {
+                            plugin.msg(p, "已购买 " + got.itemName() + " ×" + got.amount()
+                                    + (tax > 0 ? "（含税 " + plugin.vault().format(tax) + "）" : "") + "。");
+                        }
+                        if (dropped) plugin.msg(p, "背包已满，多余物品掉落在脚下。");
                         openMarket(p);
                     });
                 });
@@ -671,21 +829,21 @@ public final class LinkGui {
         async(() -> {
             Models.Listing L;
             try {
-                L = plugin.store().listing(id);
+                L = plugin.markets().listing(p, id);
                 if (L == null) {
-                    sync(() -> plugin.msg(p, "&c没了"));
+                    sync(() -> plugin.msg(p, "这件货物已经不在市场上。"));
                     return;
                 }
                 if (!L.seller().equals(p.getUniqueId()) && !p.hasPermission("eslink.admin")) {
-                    sync(() -> plugin.msg(p, "&c不是你的货"));
+                    sync(() -> plugin.msg(p, "这不是你上架的物品。"));
                     return;
                 }
                 if (!L.seller().equals(p.getUniqueId()) && !L.serverCode().equalsIgnoreCase(plugin.serverCode())) {
-                    sync(() -> plugin.msg(p, "&c只能管本服成员"));
+                    sync(() -> plugin.msg(p, "只能管理本服成员的上架。"));
                     return;
                 }
-                if (!plugin.store().deleteListing(id)) {
-                    sync(() -> plugin.msg(p, "&c下架失败"));
+                if (!plugin.markets().delete(p, id)) {
+                    sync(() -> plugin.msg(p, "下架失败。"));
                     return;
                 }
             } catch (Exception e) {
@@ -699,11 +857,11 @@ public final class LinkGui {
                     var leftover = p.getInventory().addItem(give);
                     boolean dropped = !leftover.isEmpty();
                     leftover.values().forEach(it -> p.getWorld().dropItemNaturally(p.getLocation(), it));
-                    plugin.msg(p, "&a已下架并退回");
-                    if (dropped) plugin.msg(p, "&e背包满了，多的掉在脚下");
+                    plugin.msg(p, "已下架，物品已退回。");
+                    if (dropped) plugin.msg(p, "背包已满，多余物品掉落在脚下。");
                     openMine(p);
                 } else {
-                    plugin.msg(p, "&a已强制下架（货不退给对方）");
+                    plugin.msg(p, "已强制下架。物品不会退还给对方。");
                     openSeller(p, row.seller());
                 }
             });
@@ -718,7 +876,7 @@ public final class LinkGui {
         st.awaitingSearch = false;
         st.listItem = null;
         p.closeInventory();
-        plugin.msg(p, "在聊天栏输入新单价（数字），或输入 cancel 取消。");
+        plugin.msg(p, "请在聊天栏输入新单价（数字），或输入 cancel 取消。");
     }
 
     public void finishReprice(Player p, double price) {
@@ -736,22 +894,22 @@ public final class LinkGui {
         }
         async(() -> {
             try {
-                Models.Listing L = plugin.store().listing(id);
+                Models.Listing L = plugin.markets().listing(p, id);
                 if (L == null) {
-                    sync(() -> plugin.msg(p, "&c这件货没了"));
+                    sync(() -> plugin.msg(p, "这件货物已经不在市场上。"));
                     return;
                 }
                 if (!L.seller().equals(p.getUniqueId()) && !p.hasPermission("eslink.admin")) {
-                    sync(() -> plugin.msg(p, "&c不是你的货"));
+                    sync(() -> plugin.msg(p, "这不是你上架的物品。"));
                     return;
                 }
                 if (!L.seller().equals(p.getUniqueId()) && !L.serverCode().equalsIgnoreCase(plugin.serverCode())) {
-                    sync(() -> plugin.msg(p, "&c只能管本服成员"));
+                    sync(() -> plugin.msg(p, "只能管理本服成员的上架。"));
                     return;
                 }
-                plugin.store().setListingPrice(id, price);
+                plugin.markets().setPrice(p, id, price);
                 sync(() -> {
-                    plugin.msg(p, "&a已改价为 " + (plugin.vault().ok() ? plugin.vault().format(price) : String.valueOf(price)));
+                    plugin.msg(p, "已改价为 " + (plugin.vault().ok() ? plugin.vault().format(price) : String.valueOf(price)) + "。");
                     openMine(p);
                 });
             } catch (Exception e) {
@@ -764,7 +922,7 @@ public final class LinkGui {
         org.bukkit.block.Block b = ChestListener.lookingChest(p);
         if (b == null) b = ChestListener.sessionChest(plugin, p);
         if (b == null) {
-            plugin.msg(p, "请看准箱子或牌子，再输入 /link chest。蹲下左键牌子也可打开。");
+            plugin.msg(p, "请看准箱子或牌子（5 格内），再输入 /link chest。蹲下点牌子也可打开。");
             return;
         }
         openNodeMenu(p, b);
@@ -772,9 +930,9 @@ public final class LinkGui {
 
     public void openIoMenu(Player p) {
         org.bukkit.block.Block b = ChestListener.lookingNode(p);
-        if (b == null) b = ChestListener.sessionNode(plugin, p);
+        if (b == null) b = ChestListener.sessionIo(plugin, p);
         if (b == null) {
-            plugin.msg(p, "请看准控制器方块或牌子，再输入 /link io。蹲下左键牌子也可打开。");
+            plugin.msg(p, "请对准红石灯或标靶（5 格内），再输入 /link io。蹲下点牌子也可打开。");
             return;
         }
         if (ChestListener.chestLike(b)) {
@@ -1348,6 +1506,14 @@ public final class LinkGui {
         return lore;
     }
 
+    private String buyHint(Models.Listing L, Player p) {
+        if (plugin.selfListing(L, p)) {
+            if (plugin.localListing(L)) return "&8本服货请到「我的上架」下架";
+            return "&8左键跨服取回  右键查看卖家";
+        }
+        return "&8左键购买  右键查看卖家";
+    }
+
     private ItemStack listingIcon(Models.Listing L, String hint) {
         ItemStack icon = ItemCodec.icon(L.blob(), L.itemKey(), L.itemName(), L.amount(), L.nestedKeys());
         var meta = icon.getItemMeta();
@@ -1364,6 +1530,36 @@ public final class LinkGui {
             icon.setItemMeta(meta);
         }
         return tag("listing", L.seller().toString(), L.id(), icon);
+    }
+
+    public void cycleMarketFilter(Player p) {
+        Sessions.State st = plugin.sessions().of(p);
+        async(() -> {
+            List<Models.ServerRow> servers;
+            try {
+                servers = plugin.markets().servers(p);
+            } catch (Exception e) {
+                sync(() -> openMarket(p));
+                return;
+            }
+            List<String> codes = new ArrayList<>();
+            codes.add("");
+            for (Models.ServerRow s : servers) {
+                if (s.code() != null && !s.code().isBlank()) codes.add(s.code());
+            }
+            int idx = 0;
+            String cur = st.serverFilter == null ? "" : st.serverFilter;
+            for (int i = 0; i < codes.size(); i++) {
+                if (codes.get(i).equalsIgnoreCase(cur)) {
+                    idx = i;
+                    break;
+                }
+            }
+            String next = codes.get((idx + 1) % codes.size());
+            st.serverFilter = next.isBlank() ? null : next;
+            st.marketPage = 0;
+            sync(() -> openMarket(p));
+        });
     }
 
     private ItemStack tag(String act, String data, long id, ItemStack stack) {

@@ -23,6 +23,19 @@ public final class Items {
 
     private Items() {}
 
+    public static ItemStack wand(Plugin plugin) {
+        ItemStack s = named(Material.BLAZE_ROD, "&bESLink 调试棒", List.of(
+                "&7点箱子 / 红石灯 / 牌子",
+                "&7左键或右键打开配置",
+                "&8不必蹲下，也不用准星对准",
+                "&8/link stick"));
+        return tag(plugin, s, "wand", "", 0);
+    }
+
+    public static boolean isWand(Plugin plugin, ItemStack item) {
+        return "wand".equals(act(plugin, item));
+    }
+
     public static ItemStack named(Material mat, String name, List<String> lore) {
         ItemStack stack = new ItemStack(mat);
         ItemMeta meta = stack.getItemMeta();

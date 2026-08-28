@@ -6,7 +6,7 @@
 
     <groupId>com.etherstories</groupId>
     <artifactId>ESLink</artifactId>
-    <version>0.1.80</version>
+    <version>0.2.0</version>
     <packaging>jar</packaging>
     <name>ESLink</name>
     <description>ES2 / SNC 跨服互通（大厅 + TX/RX）</description>
@@ -33,6 +33,18 @@
             <groupId>io.papermc.paper</groupId>
             <artifactId>paper-api</artifactId>
             <version>1.21.1-R0.1-SNAPSHOT</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.netty</groupId>
+            <artifactId>netty-transport</artifactId>
+            <version>4.1.97.Final</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.netty</groupId>
+            <artifactId>netty-handler</artifactId>
+            <version>4.1.97.Final</version>
             <scope>provided</scope>
         </dependency>
         <dependency>

@@ -295,9 +295,9 @@ public final class IoNet {
             plugin.msg(p, "&c数据库未连接");
             return;
         }
-        Block node = ChestListener.sessionNode(plugin, p);
+        Block node = ChestListener.sessionIo(plugin, p);
         if (node == null) {
-            plugin.msg(p, "&c请看准要当控制器的方块再输入 /link io");
+            plugin.msg(p, "&c请对准红石灯（发送）或标靶（接收），再输入 /link io");
             return;
         }
         if (ChestListener.chestLike(node)) {
@@ -306,8 +306,14 @@ public final class IoNet {
         }
         Material want = bodyFor(role);
         if (node.getType() != want) {
+            if (!isIoBody(node.getType())) {
+                plugin.msg(p, "TX".equals(role)
+                        ? "&c请对准红石灯再设为发送端"
+                        : "&c请对准标靶再设为接收端");
+                return;
+            }
             node.setType(want, false);
-            plugin.msg(p, "RX".equals(role) ? "&7已换成木桶：比较器读它就是 0–15。"
+            plugin.msg(p, "RX".equals(role) ? "&7已换成标靶：比较器读它就是 0–15。"
                     : "&7已换成红石灯：给它红石信号即可发送。");
         }
         ChestListener.clearLook(plugin, p);
@@ -371,9 +377,9 @@ public final class IoNet {
             plugin.msg(p, "&c没有权限");
             return;
         }
-        Block node = ChestListener.sessionNode(plugin, p);
+        Block node = ChestListener.sessionIo(plugin, p);
         if (node == null) {
-            plugin.msg(p, "&c请看准红石控制器");
+            plugin.msg(p, "&c请对准红石控制器");
             return;
         }
         ChestListener.clearLook(plugin, p);

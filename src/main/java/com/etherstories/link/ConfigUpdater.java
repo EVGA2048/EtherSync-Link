@@ -14,7 +14,7 @@ import java.util.Set;
 public final class ConfigUpdater {
 
     /** 与 config.yml 的 config-version 一起加 */
-    public static final int CURRENT_VERSION = 14;
+    public static final int CURRENT_VERSION = 16;
 
     private ConfigUpdater() {}
 
@@ -45,6 +45,17 @@ public final class ConfigUpdater {
         if (fileVersion < 5 && "[{code}] ".equals(cfg.getString("chat.prefix"))) {
             cfg.set("chat.prefix", "[{name}] ");
             save = true;
+        }
+
+        if (fileVersion < 15) {
+            if (cfg.getInt("chat.fast-count", 3) <= 3) {
+                cfg.set("chat.fast-count", 12);
+                save = true;
+            }
+            if (cfg.getLong("chat.fast-window-seconds", 8) >= 8) {
+                cfg.set("chat.fast-window-seconds", 6);
+                save = true;
+            }
         }
 
         if (fileVersion < CURRENT_VERSION) {

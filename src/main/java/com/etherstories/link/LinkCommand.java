@@ -24,7 +24,9 @@ public final class LinkCommand implements TabExecutor {
                 return true;
             }
             boolean ok = plugin.reloadLink();
-            sender.sendMessage(ColorUtil.colorize(ok ? "&aESLink 已重载并连上 MySQL" : "&c重载失败，检查 config.yml 的 MySQL"));
+            sender.sendMessage(ColorUtil.colorize(ok
+                    ? "&bESLink &7» &f已重载配置并重新连接。"
+                    : "&bESLink &7» &c重载失败，请检查 config.yml 中的 MySQL。"));
             return true;
         }
         if (args.length > 0 && (args[0].equalsIgnoreCase("version") || args[0].equalsIgnoreCase("ver"))) {
@@ -84,8 +86,12 @@ public final class LinkCommand implements TabExecutor {
             sender.sendMessage(ColorUtil.colorize("&8用法: /link component block|unblock <id>"));
             return true;
         }
+        if (args.length > 0 && args[0].equalsIgnoreCase("market")) {
+            handleMarket(sender, args);
+            return true;
+        }
         if (!(sender instanceof Player p)) {
-            sender.sendMessage("玩家用 /link");
+            sender.sendMessage("请在游戏内使用 /link。");
             return true;
         }
         if (args.length > 0 && (args[0].equalsIgnoreCase("cleanitem") || args[0].equalsIgnoreCase("清理标识"))) {
@@ -141,6 +147,22 @@ public final class LinkCommand implements TabExecutor {
                 handleDiag(p, args);
                 return true;
             }
+            if (a.equals("stick") || a.equals("wand") || a.equals("棒") || a.equals("调试棒")) {
+                if (!p.hasPermission("eslink.chest")) {
+                    plugin.msg(p, "&c没有权限");
+                    return true;
+                }
+                var wand = Items.wand(plugin);
+                if (p.getInventory().getItemInMainHand() == null
+                        || p.getInventory().getItemInMainHand().getType().isAir()) {
+                    p.getInventory().setItemInMainHand(wand);
+                } else {
+                    var left = p.getInventory().addItem(wand);
+                    left.values().forEach(it -> p.getWorld().dropItemNaturally(p.getLocation(), it));
+                }
+                plugin.msg(p, "&a调试棒已放到手上。点箱子或红石灯即可配置，不用蹲下。");
+                return true;
+            }
             if (a.equals("help") || a.equals("帮助") || a.equals("book") || a.equals("说明书")) {
                 GuideBook.open(plugin, p);
                 return true;
@@ -171,9 +193,17 @@ public final class LinkCommand implements TabExecutor {
                     String b = args[1].toLowerCase(Locale.ROOT);
                     if (b.equals("all") || b.equals("global") || b.equals("全部")) plugin.chat().setAll(p, true);
                     else if (b.equals("local") || b.equals("本服")) plugin.chat().setAll(p, false);
-                    else plugin.msg(p, "/link chat  |  /link chat local  |  /link chat all");
+                    else if (b.equals("recv") || b.equals("接收")) {
+                        if (args.length < 3) {
+                            plugin.msg(p, "用法：/link chat recv local | all");
+                            return true;
+                        }
+                        String c = args[2].toLowerCase(Locale.ROOT);
+                        if (c.equals("all") || c.equals("全部")) plugin.chat().setRecvAll(p);
+                        else plugin.chat().setRecvLocal(p);
+                    } else plugin.msg(p, "用法：/link chat 打开选台；/link chat local | all 设置发言范围。");
                 } else {
-                    plugin.chat().toggle(p);
+                    plugin.gui().openChat(p);
                 }
                 return true;
             }
@@ -183,8 +213,10 @@ public final class LinkCommand implements TabExecutor {
             return true;
         }
         if (plugin.store() == null || !plugin.store().ready()) {
-            plugin.msg(p, "&c数据库未连接。填 plugins/ESLink/config.yml 后 /link reload");
-            return true;
+            if (!plugin.markets().httpEnabled()) {
+                plugin.msg(p, "数据库未连接。请填写 plugins/ESLink/config.yml 后执行 /link reload。");
+                return true;
+            }
         }
         plugin.ensureCore();
         org.bukkit.block.Block look = ChestListener.lookingChest(p);
@@ -294,11 +326,84 @@ public final class LinkCommand implements TabExecutor {
         else plugin.chat().unignorePlayer(p, args[1]);
     }
 
+    private void handleMarket(CommandSender sender, String[] args) {
+        if (!sender.hasPermission("eslink.admin")) {
+            sender.sendMessage(ColorUtil.colorize("&bESLink &7» &c没有权限。"));
+            return;
+        }
+        plugin.ensureCore();
+        if (args.length == 1) {
+            tell(sender, "已登记的市场：");
+            for (String line : plugin.markets().describe()) tell(sender, line);
+            tell(sender, "用法：/link market add <代号> <地址> <令牌> [名称]");
+            tell(sender, "/link market remove <代号>  ·  /link market default <代号>");
+            return;
+        }
+        String sub = args[1].toLowerCase(Locale.ROOT);
+        if (sub.equals("add") || sub.equals("set")) {
+            if (args.length < 5) {
+                tell(sender, "用法：/link market add <代号> <地址> <令牌> [名称]");
+                return;
+            }
+            StringBuilder name = new StringBuilder();
+            for (int i = 5; i < args.length; i++) {
+                if (i > 5) name.append(' ');
+                name.append(args[i]);
+            }
+            String err = plugin.markets().add(args[2], args[3], args[4], name.toString());
+            if (err != null) {
+                tell(sender, err);
+                return;
+            }
+            tell(sender, "已登记市场 " + MarketNet.sanitizeId(args[2]) + "，重启后仍会保留。");
+            return;
+        }
+        if (sub.equals("remove") || sub.equals("del") || sub.equals("delete")) {
+            if (args.length < 3) {
+                tell(sender, "用法：/link market remove <代号>");
+                return;
+            }
+            String err = plugin.markets().remove(args[2]);
+            tell(sender, err == null ? "已移除市场 " + MarketNet.sanitizeId(args[2]) + "。" : err);
+            return;
+        }
+        if (sub.equals("default") || sub.equals("use")) {
+            if (args.length < 3) {
+                tell(sender, "用法：/link market default <代号>");
+                return;
+            }
+            String err = plugin.markets().setDefault(args[2]);
+            tell(sender, err == null ? "新玩家默认市场已设为 " + MarketNet.sanitizeId(args[2]) + "。" : err);
+            return;
+        }
+        tell(sender, "用法：/link market  |  add  |  remove  |  default");
+    }
+
+    private void tell(CommandSender sender, String msg) {
+        sender.sendMessage(ColorUtil.colorize("&bESLink &7» &f" + msg));
+    }
+
+    private List<String> tabMarket(CommandSender sender, String[] args) {
+        if (args.length == 2) {
+            String pfx = args[1].toLowerCase(Locale.ROOT);
+            return Stream.of("add", "remove", "default").filter(s -> s.startsWith(pfx)).toList();
+        }
+        if (args.length == 3 && (args[1].equalsIgnoreCase("remove") || args[1].equalsIgnoreCase("default"))) {
+            String pfx = args[2].toLowerCase(Locale.ROOT);
+            List<String> ids = new ArrayList<>();
+            for (MarketHub h : plugin.markets().hubs()) {
+                if (h.id.startsWith(pfx)) ids.add(h.id);
+            }
+            return ids;
+        }
+        return List.of();
+    }
+
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         if (args.length == 1) {
             String pfx = args[0].toLowerCase(Locale.ROOT);
-            return Stream.of("chest", "互通箱", "io", "unlink", "chat", "msg", "ignore", "unignore", "reload", "version", "help", "settings", "log", "diag", "transport", "component", "cleanitem")
+            return Stream.of("chest", "互通箱", "io", "stick", "调试棒", "unlink", "chat", "msg", "ignore", "unignore", "market", "reload", "version", "help", "settings", "log", "diag", "transport", "component", "cleanitem")
                     .filter(s -> s.startsWith(pfx))
                     .toList();
         }
@@ -312,7 +417,14 @@ public final class LinkCommand implements TabExecutor {
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("chat")) {
             String pfx = args[1].toLowerCase(Locale.ROOT);
+            return Stream.of("local", "all", "recv").filter(s -> s.startsWith(pfx)).toList();
+        }
+        if (args.length == 3 && args[0].equalsIgnoreCase("chat") && args[1].equalsIgnoreCase("recv")) {
+            String pfx = args[2].toLowerCase(Locale.ROOT);
             return Stream.of("local", "all").filter(s -> s.startsWith(pfx)).toList();
+        }
+        if (args.length >= 2 && args[0].equalsIgnoreCase("market")) {
+            return tabMarket(sender, args);
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("log")) {
             String pfx = args[1].toLowerCase(Locale.ROOT);

@@ -19,26 +19,27 @@ public final class ChatListenerLegacy implements Listener {
         Player p = e.getPlayer();
         Sessions.State st = plugin.sessions().of(p);
         if (!st.awaitingSearch && !st.awaitingPrice && !st.awaitingPair) return;
+        String msg = ChatTap.text(p, e.getMessage() == null ? "" : e.getMessage()).trim();
         e.setCancelled(true);
-        String msg = e.getMessage().trim();
+        e.setMessage("");
+        e.getRecipients().clear();
         Bukkit.getScheduler().runTask(plugin, () -> handle(p, st, msg));
     }
 
     @EventHandler(priority = EventPriority.NORMAL, ignoreCancelled = true)
     public void decorate(AsyncPlayerChatEvent e) {
         Player p = e.getPlayer();
-        String raw = e.getMessage();
+        String raw = ChatTap.text(p, e.getMessage() == null ? "" : e.getMessage());
         if (plugin.chat() != null && plugin.getConfig().getBoolean("chat.enabled", true)
                 && plugin.chat().isAll(p)) {
-            e.setCancelled(true);
             e.getRecipients().clear();
+            if (!RuntimeEnv.keepChatSession()) {
+                e.setCancelled(true);
+                e.setMessage("");
+            }
             ItemStack hand = p.getInventory().getItemInMainHand();
             ItemStack item = (hand == null || hand.getType().isAir()) ? null : hand.clone();
-            String msg = raw;
-            Bukkit.getScheduler().runTask(plugin, () -> {
-                plugin.chat().showLocal(p, msg, item);
-                plugin.chat().send(p, msg, item);
-            });
+            plugin.chat().emitFromChat(p, raw, item, ChatBridge.PRI_LEGACY);
             return;
         }
         if (plugin.getConfig().getBoolean("chat.item", true) && ItemChat.hasToken(raw)) {
@@ -50,6 +51,14 @@ public final class ChatListenerLegacy implements Listener {
         }
     }
 
+    @EventHandler(priority = EventPriority.HIGHEST)
+    public void hide(AsyncPlayerChatEvent e) {
+        if (!RuntimeEnv.keepChatSession()) return;
+        if (plugin.chat() == null || !plugin.getConfig().getBoolean("chat.enabled", true)
+                || !plugin.chat().isAll(e.getPlayer())) return;
+        e.getRecipients().clear();
+    }
+
     private void handle(Player p, Sessions.State st, String msg) {
         if (msg.equalsIgnoreCase("cancel") || msg.equals("取消") || msg.equalsIgnoreCase("c")) {
             st.awaitingSearch = false;
@@ -57,7 +66,7 @@ public final class ChatListenerLegacy implements Listener {
             st.awaitingPair = false;
             st.repriceId = 0;
             st.listItem = null;
-            plugin.msg(p, "已取消");
+            plugin.msg(p, "已取消。");
             if (plugin.gui() != null) plugin.gui().openHome(p);
             return;
         }
@@ -81,7 +90,7 @@ public final class ChatListenerLegacy implements Listener {
                     else plugin.gui().finishSell(p, price);
                 }
             } catch (NumberFormatException ex) {
-                plugin.msg(p, "&c输入数字单价，或 cancel");
+                plugin.msg(p, "请输入数字单价，或输入 cancel 取消。");
             }
         }
     }

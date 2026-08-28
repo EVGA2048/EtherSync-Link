@@ -1,13 +1,32 @@
 package com.etherstories.link;
 
+import io.papermc.paper.event.player.AsyncChatEvent;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.event.HoverEvent;
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
+import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import org.bukkit.inventory.ItemStack;
 
 /** 仅 Paper AsyncChatEvent 路径加载，Arclight 不会碰这个类。 */
 final class ItemChatPaper {
     private ItemChatPaper() {}
+
+    /** Youer/Paper 签名聊天里 e.message() 会卡住上一句，优先读签名原文。 */
+    static String plain(AsyncChatEvent e) {
+        try {
+            String s = e.signedMessage().message();
+            if (s != null && !s.isBlank()) return s;
+        } catch (Throwable ignored) {}
+        try {
+            String s = PlainTextComponentSerializer.plainText().serialize(e.originalMessage());
+            if (s != null && !s.isBlank()) return s;
+        } catch (Throwable ignored) {}
+        try {
+            return PlainTextComponentSerializer.plainText().serialize(e.message());
+        } catch (Throwable t) {
+            return "";
+        }
+    }
 
     static Component replace(String plain, ItemStack item) {
         Component piece = itemPart(item);

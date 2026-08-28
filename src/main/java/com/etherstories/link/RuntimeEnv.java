@@ -34,6 +34,10 @@ public final class RuntimeEnv {
 
     public static Kind kind() { return kind; }
 
+    public static boolean keepChatSession() {
+        return kind == Kind.ARCLIGHT;
+    }
+
     public static boolean hybrid() {
         return kind == Kind.ARCLIGHT || kind == Kind.MOHIST || forge;
     }

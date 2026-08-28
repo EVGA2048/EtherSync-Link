@@ -13,6 +13,7 @@ import org.bukkit.block.data.Directional;
 import org.bukkit.block.data.type.WallSign;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.block.BlockBreakEvent;
@@ -36,6 +37,12 @@ public final class ChestListener implements Listener {
 
     @EventHandler(ignoreCancelled = true)
     public void onBreak(BlockBreakEvent e) {
+        Player p = e.getPlayer();
+        if (Items.isWand(plugin, p.getInventory().getItemInMainHand())) {
+            e.setCancelled(true);
+            useWand(p, e.getBlock());
+            return;
+        }
         Block b = e.getBlock();
         Block loc = null;
         if (b.getState() instanceof Chest) loc = b;
@@ -57,7 +64,6 @@ public final class ChestListener implements Listener {
         }
         if (loc == null) return;
         if (!plugin.store().ready()) return;
-        Player p = e.getPlayer();
         Models.ChestRow cachedChest = plugin.chests() == null ? null
                 : plugin.chests().cachedAt(loc.getWorld().getName(), loc.getX(), loc.getY(), loc.getZ());
         Models.IoRow cachedIo = plugin.io() == null ? null
@@ -145,9 +151,16 @@ public final class ChestListener implements Listener {
         }, 40L);
     }
 
-    @EventHandler
+    @EventHandler(priority = EventPriority.HIGH)
     public void onSign(PlayerInteractEvent e) {
         if (e.getHand() != EquipmentSlot.HAND) return;
+        if (e.getAction() != Action.LEFT_CLICK_BLOCK && e.getAction() != Action.RIGHT_CLICK_BLOCK
+                && e.getAction() != Action.LEFT_CLICK_AIR && e.getAction() != Action.RIGHT_CLICK_AIR) return;
+        if (Items.isWand(plugin, e.getPlayer().getInventory().getItemInMainHand())) {
+            e.setCancelled(true);
+            useWand(e.getPlayer(), e.getClickedBlock());
+            return;
+        }
         if (e.getAction() != Action.LEFT_CLICK_BLOCK && e.getAction() != Action.RIGHT_CLICK_BLOCK) return;
         Block hit = e.getClickedBlock();
         if (hit == null) return;
@@ -173,6 +186,36 @@ public final class ChestListener implements Listener {
         if (node == null) return;
         e.setCancelled(true);
         plugin.gui().openNodeMenu(e.getPlayer(), node);
+    }
+
+    void useWand(Player p, Block hit) {
+        if (!p.hasPermission("eslink.chest")) {
+            plugin.msg(p, "&c没有权限");
+            return;
+        }
+        if (plugin.store() == null || !plugin.store().ready()) {
+            plugin.msg(p, "&c数据库未连接");
+            return;
+        }
+        Block node = wandTarget(hit);
+        if (node == null) {
+            plugin.msg(p, "&c请点箱子、红石灯或牌子");
+            return;
+        }
+        plugin.gui().openNodeMenu(p, node);
+    }
+
+    static Block wandTarget(Block hit) {
+        if (hit == null) return null;
+        if (chestLike(hit)) return hit;
+        if (IoNet.isIoBody(hit.getType())) return hit;
+        if (signLike(hit)) {
+            Block chest = attachedChest(hit);
+            if (chest != null) return chest;
+            Block solid = attachedSolid(hit);
+            if (solid != null && IoNet.isIoBody(solid.getType())) return solid;
+        }
+        return null;
     }
 
     @EventHandler(ignoreCancelled = true)
@@ -257,12 +300,27 @@ public final class ChestListener implements Listener {
         return lookingNode(p);
     }
 
+    static Block sessionIo(ESLinkPlugin plugin, Player p) {
+        Sessions.State st = plugin.sessions().of(p);
+        if (st.hasLook && st.lookWorld != null) {
+            org.bukkit.World w = org.bukkit.Bukkit.getWorld(st.lookWorld);
+            if (w != null) {
+                Block b = w.getBlockAt(st.lookX, st.lookY, st.lookZ);
+                if (IoNet.isIoBody(b.getType())) return b;
+            }
+        }
+        return lookingNode(p);
+    }
+
+    /** 只认准星正中的红石灯 / 标靶 / 木桶。远距离或擦边不算。 */
     static Block lookingNode(Player p) {
-        Block hit = look(p, 8);
+        Block hit = look(p, LOOK_REACH);
         if (hit == null) return null;
-        if (signLike(hit)) return attachedSolid(hit);
-        if (hit.getType().isAir()) return null;
-        return hit;
+        if (signLike(hit)) {
+            Block attached = attachedSolid(hit);
+            return attached != null && IoNet.isIoBody(attached.getType()) ? attached : null;
+        }
+        return IoNet.isIoBody(hit.getType()) ? hit : null;
     }
 
     static Block attachedSolid(Block sign) {
@@ -307,7 +365,7 @@ public final class ChestListener implements Listener {
     }
 
     static Block lookingChest(Player p) {
-        Block hit = look(p, 8);
+        Block hit = look(p, LOOK_REACH);
         if (hit == null) return null;
         if (chestLike(hit)) return hit;
         if (signLike(hit)) return attachedChest(hit);
@@ -319,6 +377,8 @@ public final class ChestListener implements Listener {
         if (b == null) return false;
         Material t = b.getType();
         if (t == Material.CHEST || t == Material.TRAPPED_CHEST || t == Material.BARREL) return true;
+        String n = t.name();
+        if (n.endsWith("_CHEST") && !n.contains("ENDER")) return true;
         try {
             var st = b.getState();
             return st instanceof Chest || st instanceof org.bukkit.block.Barrel;
@@ -337,40 +397,74 @@ public final class ChestListener implements Listener {
         return n.endsWith("_SIGN") || n.equals("SIGN");
     }
 
+    /** 生存触及约 4.5，再远就会把旁边的红石灯也算进去。 */
+    static final int LOOK_REACH = 5;
+
     static Block look(Player p, int max) {
         if (p == null) return null;
+        var eye = p.getEyeLocation();
+        var dir = eye.getDirection();
+        if (dir.lengthSquared() < 1e-12) return null;
+        dir.normalize();
+
         try {
-            Block b = p.getTargetBlockExact(max, FluidCollisionMode.NEVER);
-            if (b != null && !b.getType().isAir()) return b;
-        } catch (Throwable ignored) {
-        }
-        try {
-            Block b = p.getTargetBlockExact(max);
-            if (b != null && !b.getType().isAir()) return b;
-        } catch (Throwable ignored) {
-        }
-        try {
-            java.util.Set<Material> skip = java.util.EnumSet.of(
-                    Material.AIR, Material.CAVE_AIR, Material.VOID_AIR, Material.WATER, Material.LAVA);
-            Block b = p.getTargetBlock(skip, max);
-            if (b != null && !skip.contains(b.getType())) return b;
-        } catch (Throwable ignored) {
-        }
-        try {
-            var start = p.getEyeLocation();
-            var dir = start.getDirection();
-            var w = p.getWorld();
-            for (double d = 0.2; d <= max; d += 0.2) {
-                Block b = w.getBlockAt(
-                        (int) Math.floor(start.getX() + dir.getX() * d),
-                        (int) Math.floor(start.getY() + dir.getY() * d),
-                        (int) Math.floor(start.getZ() + dir.getZ() * d));
-                if (b.getType().isAir() || b.getType() == Material.WATER || b.getType() == Material.LAVA) continue;
-                return b;
+            var hit = p.getWorld().rayTraceBlocks(eye, dir, max, FluidCollisionMode.NEVER, false);
+            if (hit != null) {
+                Block b = hit.getHitBlock();
+                if (b != null && !passable(b.getType())) return b;
             }
         } catch (Throwable ignored) {
         }
+        try {
+            Block b = p.getTargetBlockExact(max, FluidCollisionMode.NEVER);
+            if (b != null && !passable(b.getType())) return b;
+        } catch (Throwable ignored) {
+        }
+        // 不用 getTargetBlock：Youer 上判定盒过大，擦边也能打到红石灯。
+        return rayGrid(p.getWorld(), eye, dir, max);
+    }
+
+    private static boolean passable(Material m) {
+        if (m == null || m.isAir()) return true;
+        if (m == Material.WATER || m == Material.LAVA) return true;
+        String n = m.name();
+        return n.equals("CAVE_AIR") || n.equals("VOID_AIR") || n.equals("LIGHT")
+                || n.equals("BUBBLE_COLUMN");
+    }
+
+    /** Amanatides–Woo 格点遍历，按方块边界走，不按 0.2 抽样。 */
+    private static Block rayGrid(org.bukkit.World w, org.bukkit.Location eye, org.bukkit.util.Vector dir, int max) {
+        if (w == null) return null;
+        double x = eye.getX(), y = eye.getY(), z = eye.getZ();
+        int ix = (int) Math.floor(x), iy = (int) Math.floor(y), iz = (int) Math.floor(z);
+        int sx = dir.getX() > 0 ? 1 : dir.getX() < 0 ? -1 : 0;
+        int sy = dir.getY() > 0 ? 1 : dir.getY() < 0 ? -1 : 0;
+        int sz = dir.getZ() > 0 ? 1 : dir.getZ() < 0 ? -1 : 0;
+        double tMaxX = gridBound(x, dir.getX(), ix, sx);
+        double tMaxY = gridBound(y, dir.getY(), iy, sy);
+        double tMaxZ = gridBound(z, dir.getZ(), iz, sz);
+        double tDeltaX = sx == 0 ? Double.POSITIVE_INFINITY : 1.0 / Math.abs(dir.getX());
+        double tDeltaY = sy == 0 ? Double.POSITIVE_INFINITY : 1.0 / Math.abs(dir.getY());
+        double tDeltaZ = sz == 0 ? Double.POSITIVE_INFINITY : 1.0 / Math.abs(dir.getZ());
+        double t = 0;
+        while (t <= max) {
+            Block b = w.getBlockAt(ix, iy, iz);
+            if (!passable(b.getType())) return b;
+            if (tMaxX < tMaxY) {
+                if (tMaxX < tMaxZ) { ix += sx; t = tMaxX; tMaxX += tDeltaX; }
+                else { iz += sz; t = tMaxZ; tMaxZ += tDeltaZ; }
+            } else {
+                if (tMaxY < tMaxZ) { iy += sy; t = tMaxY; tMaxY += tDeltaY; }
+                else { iz += sz; t = tMaxZ; tMaxZ += tDeltaZ; }
+            }
+        }
         return null;
+    }
+
+    private static double gridBound(double p, double d, int i, int step) {
+        if (step == 0) return Double.POSITIVE_INFINITY;
+        double next = step > 0 ? (i + 1) : i;
+        return (next - p) / d;
     }
 
     static Inventory chestInv(Block b) {
@@ -500,15 +594,15 @@ public final class ChestListener implements Listener {
     static Block attachedChest(Block sign) {
         if (sign.getBlockData() instanceof WallSign ws) {
             Block behind = sign.getRelative(ws.getFacing().getOppositeFace());
-            if (behind.getType() == Material.CHEST || behind.getType() == Material.TRAPPED_CHEST) return behind;
+            if (chestLike(behind)) return behind;
         }
         if (sign.getBlockData() instanceof Directional d && !(sign.getBlockData() instanceof WallSign)) {
             Block behind = sign.getRelative(d.getFacing().getOppositeFace());
-            if (behind.getType() == Material.CHEST || behind.getType() == Material.TRAPPED_CHEST) return behind;
+            if (chestLike(behind)) return behind;
         }
         for (BlockFace f : AROUND) {
             Block n = sign.getRelative(f);
-            if (n.getType() == Material.CHEST || n.getType() == Material.TRAPPED_CHEST) return n;
+            if (chestLike(n)) return n;
         }
         return null;
     }

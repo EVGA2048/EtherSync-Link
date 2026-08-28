@@ -9,7 +9,7 @@ import java.util.concurrent.ConcurrentHashMap;
 /** GUI / 聊天检索会话 */
 public final class Sessions {
 
-    public enum Page { HOME, MARKET, SELLER, LIST, MINE, PAIR, CONFIRM, ADMIN, SETTINGS, COLORS, SERVERS, CHEST, WATCH, NODES, ADMIN_NODES }
+    public enum Page { HOME, MARKET, SELLER, LIST, MINE, PAIR, CONFIRM, ADMIN, SETTINGS, COLORS, SERVERS, CHEST, WATCH, NODES, ADMIN_NODES, CHAT }
 
     public static final class State {
         public Page page = Page.HOME;

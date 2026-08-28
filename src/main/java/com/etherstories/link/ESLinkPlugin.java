@@ -1,13 +1,17 @@
 package com.etherstories.link;
 
 import org.bukkit.Bukkit;
+import org.bukkit.NamespacedKey;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
+import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 public final class ESLinkPlugin extends JavaPlugin {
@@ -20,12 +24,16 @@ public final class ESLinkPlugin extends JavaPlugin {
     private IoNet io;
     private ChatBridge chat;
     private AlertNet alerts;
+    private MarketNet markets;
     private final Set<String> rxKeys = ConcurrentHashMap.newKeySet();
     private final Set<java.util.UUID> guideWelcomed = ConcurrentHashMap.newKeySet();
     private final java.util.Map<String, Models.ServerRow> serverCache = new ConcurrentHashMap<>();
     private volatile boolean ioEnabled = true;
     private volatile boolean transportEnabled = true;
     private final Set<String> blockedComponents = ConcurrentHashMap.newKeySet();
+    private final Map<UUID, Long> selfBuyAt = new ConcurrentHashMap<>();
+    private NamespacedKey selfBuyDayKey;
+    private NamespacedKey selfBuyCountKey;
 
     @Override
     public void onEnable() {
@@ -52,6 +60,9 @@ public final class ESLinkPlugin extends JavaPlugin {
             ContainerSupport.scheduleProbe(this);
 
             Bukkit.getPluginManager().registerEvents(new GuiListener(this), this);
+            ChatTap tap = new ChatTap(this);
+            Bukkit.getPluginManager().registerEvents(tap, this);
+            tap.hookOnline();
             registerChatListener();
             Bukkit.getPluginManager().registerEvents(new ChestListener(this), this);
             Bukkit.getPluginManager().registerEvents(new ProxyLockListener(), this);
@@ -60,9 +71,9 @@ public final class ESLinkPlugin extends JavaPlugin {
             if (!store.connect()) {
                 getLogger().warning("MySQL 未连上。填 plugins/ESLink/config.yml 后 /link reload");
             } else {
-                startTasks();
                 getLogger().info("ESLink 已连接  " + serverCode() + " / " + serverName());
             }
+            startTasks();
         } catch (Throwable t) {
             getLogger().severe("ESLink 启动出错（指令仍可用）: " + t.getMessage());
             t.printStackTrace();
@@ -80,6 +91,10 @@ public final class ESLinkPlugin extends JavaPlugin {
         if (io == null) io = new IoNet(this);
         if (chat == null) chat = new ChatBridge(this);
         if (alerts == null) alerts = new AlertNet(this);
+        if (markets == null) markets = new MarketNet(this);
+        else markets.reload();
+        if (selfBuyDayKey == null) selfBuyDayKey = new NamespacedKey(this, "sb_day");
+        if (selfBuyCountKey == null) selfBuyCountKey = new NamespacedKey(this, "sb_n");
     }
 
     /** 从 config 加载急停开关与组件黑名单（重启/重载后仍生效）。 */
@@ -127,17 +142,21 @@ public final class ESLinkPlugin extends JavaPlugin {
     }
 
     private void registerChatListener() {
-        boolean hybrid = RuntimeEnv.hybrid();
-        if (!hybrid) {
-            try {
-                Class.forName("io.papermc.paper.event.player.AsyncChatEvent");
-                Bukkit.getPluginManager().registerEvents(new ChatListener(this), this);
-                return;
-            } catch (Throwable ignored) {
-            }
+        boolean paper = false;
+        try {
+            Class.forName("io.papermc.paper.event.player.AsyncChatEvent");
+            Bukkit.getPluginManager().registerEvents(new ChatListener(this), this);
+            paper = true;
+        } catch (Throwable ignored) {
         }
         Bukkit.getPluginManager().registerEvents(new ChatListenerLegacy(this), this);
-        getLogger().info("聊天改用兼容模式（" + Bukkit.getName() + "）");
+        if (paper && RuntimeEnv.kind() == RuntimeEnv.Kind.ARCLIGHT) {
+            getLogger().info("聊天: Arclight 不取消原包（避免签名会话卡住）");
+        } else if (paper && RuntimeEnv.hybrid()) {
+            getLogger().info("聊天: 签名原文 + 兼容去重（" + Bukkit.getName() + "）");
+        } else if (!paper) {
+            getLogger().info("聊天改用兼容模式（" + Bukkit.getName() + "）");
+        }
     }
 
     @Override
@@ -160,10 +179,11 @@ public final class ESLinkPlugin extends JavaPlugin {
             ContainerSupport.probe(this);
             if (store != null) store.close();
             store = new Store(this);
+            if (markets != null) markets.reload();
             chat.resetCursor();
             if (alerts != null) alerts.resetCursor();
             boolean ok = store.connect();
-            if (ok) startTasks();
+            startTasks();
             return ok;
         } catch (Throwable t) {
             getLogger().severe("reload 失败: " + t.getMessage());
@@ -184,6 +204,7 @@ public final class ESLinkPlugin extends JavaPlugin {
                     Compat.publish(this);
                     Compat.refresh(this);
                 }
+                if (markets != null) markets.heartbeatAll();
             } catch (Exception e) {
                 getLogger().warning("心跳失败: " + e.getMessage());
             }
@@ -285,6 +306,10 @@ public final class ESLinkPlugin extends JavaPlugin {
         for (Models.ServerRow s : rows) {
             if (s.code() != null) serverCache.put(s.code().toUpperCase(Locale.ROOT), s);
         }
+    }
+
+    public List<Models.ServerRow> cachedServers() {
+        return new java.util.ArrayList<>(serverCache.values());
     }
 
     /** 玩家看见的服名。内部代号不展示。 */
@@ -419,6 +444,10 @@ public final class ESLinkPlugin extends JavaPlugin {
         if (alerts == null) alerts = new AlertNet(this);
         return alerts;
     }
+    public MarketNet markets() {
+        if (markets == null) markets = new MarketNet(this);
+        return markets;
+    }
 
     public String serverColor() {
         String c = getConfig().getString("server.color", "LIGHT_BLUE");
@@ -471,6 +500,71 @@ public final class ESLinkPlugin extends JavaPlugin {
         return Math.round(price * taxRate() * 100.0) / 100.0;
     }
 
+    public boolean selfBuyEnabled() {
+        return getConfig().getBoolean("trade.self-buy", true);
+    }
+
+    public double selfBuyMinFee() {
+        return Math.max(0, getConfig().getDouble("trade.self-buy-min-fee", 64));
+    }
+
+    public double selfBuySurcharge() {
+        double r = getConfig().getDouble("trade.self-buy-surcharge", 0);
+        if (r < 0) return 0;
+        if (r > 1) return 1;
+        return r;
+    }
+
+    /** 跨服取回：货款不打给自己，只收 max(保底, 互通税 + 抽成)。 */
+    public double selfBuyFee(double price) {
+        double tax = taxOf(price);
+        double extra = Math.round(Math.max(0, price) * selfBuySurcharge() * 100.0) / 100.0;
+        return Math.max(selfBuyMinFee(), tax + extra);
+    }
+
+    public boolean selfListing(Models.Listing L, Player p) {
+        return L != null && p != null && L.seller().equals(p.getUniqueId());
+    }
+
+    public boolean localListing(Models.Listing L) {
+        return L != null && L.serverCode() != null
+                && L.serverCode().equalsIgnoreCase(serverCode());
+    }
+
+    public String selfBuyGate(Player p) {
+        if (!selfBuyEnabled()) return "本服未开放跨服取回。请到上架所在服务器下架。";
+        int cd = Math.max(0, getConfig().getInt("trade.self-buy-cooldown-seconds", 20));
+        if (cd > 0) {
+            Long last = selfBuyAt.get(p.getUniqueId());
+            long now = System.currentTimeMillis();
+            if (last != null && now - last < cd * 1000L) {
+                long left = (cd * 1000L - (now - last) + 999) / 1000;
+                return "跨服取回正在冷却，请于 " + left + " 秒后再试。";
+            }
+        }
+        int cap = getConfig().getInt("trade.self-buy-daily", 12);
+        if (cap > 0) {
+            int day = (int) (System.currentTimeMillis() / 86_400_000L);
+            var pdc = p.getPersistentDataContainer();
+            int stored = pdc.getOrDefault(selfBuyDayKey, PersistentDataType.INTEGER, -1);
+            int n = stored == day ? pdc.getOrDefault(selfBuyCountKey, PersistentDataType.INTEGER, 0) : 0;
+            if (n >= cap) return "今日跨服取回已达上限（" + cap + " 次）。";
+        }
+        return null;
+    }
+
+    public void selfBuyMark(Player p) {
+        selfBuyAt.put(p.getUniqueId(), System.currentTimeMillis());
+        int cap = getConfig().getInt("trade.self-buy-daily", 12);
+        if (cap <= 0) return;
+        int day = (int) (System.currentTimeMillis() / 86_400_000L);
+        var pdc = p.getPersistentDataContainer();
+        int stored = pdc.getOrDefault(selfBuyDayKey, PersistentDataType.INTEGER, -1);
+        int n = stored == day ? pdc.getOrDefault(selfBuyCountKey, PersistentDataType.INTEGER, 0) : 0;
+        pdc.set(selfBuyDayKey, PersistentDataType.INTEGER, day);
+        pdc.set(selfBuyCountKey, PersistentDataType.INTEGER, n + 1);
+    }
+
     public void setTradeEnabled(boolean v) {
         getConfig().set("trade.enabled", v);
         saveConfig();
@@ -515,7 +609,7 @@ public final class ESLinkPlugin extends JavaPlugin {
         p.getPersistentDataContainer().set(
                 new org.bukkit.NamespacedKey(this, "list_alert"), org.bukkit.persistence.PersistentDataType.BYTE,
                 on ? (byte) 1 : (byte) 0);
-        msg(p, on ? "&a将接收上架通知" : "&7已关闭上架通知");
+        msg(p, on ? "已开启上架通知。" : "已关闭上架通知。");
     }
 
     public boolean isSuper(Player p) {

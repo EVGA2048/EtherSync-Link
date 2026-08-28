@@ -2,7 +2,7 @@
 # 新版本会自动补缺失的键，不会改你已经填过的值。
 # /link 大厅    /link chest    /link io    /link settings
 
-config-version: 14
+config-version: 16
 config:
   auto-fill-missing: true
 
@@ -78,6 +78,25 @@ trade:
   tax-rate: 0
   # 税入账玩家名；空则尝试用 ES2UniPlugin 的 tax.sink-account；再空则销毁
   sink-account: ""
+  # 同一账号在其他服务器取回自己的货：货款不打给自己，只收取回费
+  self-buy: true
+  self-buy-min-fee: 64
+  self-buy-surcharge: 0
+  self-buy-cooldown-seconds: 20
+  self-buy-daily: 12
+
+# 独立市场服务（Python，自带 SQLite）。未登记时货单仍走上方 MySQL。
+# 管理可用 /link market add <代号> <地址> <令牌> [名称]，写入本段并在重启后保留。
+markets:
+  default: ""
+  list: {}
+  # 示例：
+  # default: ether
+  # list:
+  #   ether:
+  #     name: 以太货栈
+  #     url: http://127.0.0.1:8765
+  #     token: "change-me"
 
 # 也可给权限 eslink.super。用来删除调试残留的服务器记录。
 super-admins: []
@@ -88,6 +107,6 @@ chat:
   prefix: "[{name}] "
   max-length: 128
   item: true
-  fast-window-seconds: 8
-  fast-count: 3
+  fast-window-seconds: 6
+  fast-count: 12
   fast-remind-seconds: 25
