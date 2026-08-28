@@ -52,7 +52,8 @@ Paper / Bukkit 插件，多台服之间传物品、红石、聊天，也能上�
 1. jar 丢进各服 `plugins/`，启动一次，会出 `plugins/ESLink/config.yml`。
 2. MySQL 填成同一套。
 3. 每台服改自己的 `server`：
-   - `code`：内部代号，字母数字，全网别重复。牌子配对用这个，玩家看不见。
+   - `code`：内部代号，字母数字，全网别重复。牌子配对用这个。
+   - `short`：聊天前面那一小段，比如 ES2、SNC。空着就用 code。
    - `name` / `blurb`：大厅上显示的名字和一句介绍。
    - `icon`：`TERRACOTTA` 或 `CONCRETE`。
    - `color`：大厅那块陶瓦的颜色，外服聊天前缀也用这个色。
@@ -89,7 +90,7 @@ Paper / Bukkit 插件，多台服之间传物品、红石、聊天，也能上�
 - 发言：只本服，或发到聊天网上的所有服
 - 接收：不收外服（默认）、全收，或按服勾选。陶瓦颜色就是那台服的主题色
 
-外服消息长这样：`[服名] 玩家: 内容`，颜色跟大厅标识一致。说太快，这一句传不过去，本服还能看见。
+外服消息长这样：`[ES2] 玩家: 内容`。短标签在各服 `server.short` 里配，颜色跟大厅标识一致。说太快，这一句传不过去，本服还能看见。
 
 `/link msg 玩家 内容` 私聊。聊天里打 `[i]` 会带上主手里的东西。
 
@@ -191,6 +192,7 @@ markets:
 | 键 | 含义 |
 |---|---|
 | `server.code` | 本服内部代号，别跟别人重复 |
+| `server.short` | 聊天前缀，空则用 code |
 | `heartbeat-seconds` / `offline-after-seconds` | 心跳、多久算离线 |
 | `chest.stacks-per-scan` | 每轮最多发几组 |
 | `chest.queue-limit` | 路上能堆多少，满了 TX 停 |

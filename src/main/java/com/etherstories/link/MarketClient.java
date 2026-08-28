@@ -62,6 +62,7 @@ final class MarketClient {
             out.add(new Models.ServerRow(
                     str(s, "code"),
                     str(s, "name"),
+                    str(s, "short"),
                     str(s, "blurb"),
                     str(s, "color").isBlank() ? "LIGHT_BLUE" : str(s, "color"),
                     str(s, "icon").isBlank() ? "TERRACOTTA" : str(s, "icon"),

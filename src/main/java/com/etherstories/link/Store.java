@@ -72,6 +72,7 @@ public final class Store {
             try { s.executeUpdate("ALTER TABLE link_servers ADD COLUMN blurb VARCHAR(128) NOT NULL DEFAULT ''"); } catch (Exception ignored) {}
             try { s.executeUpdate("ALTER TABLE link_servers ADD COLUMN color VARCHAR(16) NOT NULL DEFAULT 'LIGHT_BLUE'"); } catch (Exception ignored) {}
             try { s.executeUpdate("ALTER TABLE link_servers ADD COLUMN icon VARCHAR(16) NOT NULL DEFAULT 'TERRACOTTA'"); } catch (Exception ignored) {}
+            try { s.executeUpdate("ALTER TABLE link_servers ADD COLUMN short_name VARCHAR(16) NOT NULL DEFAULT ''"); } catch (Exception ignored) {}
             s.executeUpdate("""
                     CREATE TABLE IF NOT EXISTS link_listings (
                       id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -257,20 +258,22 @@ public final class Store {
         }
     }
 
-    public void heartbeat(String code, String name, String blurb, String color, String icon) throws Exception {
+    public void heartbeat(String code, String name, String shortName, String blurb, String color, String icon) throws Exception {
         try (Connection c = ds.getConnection();
              PreparedStatement ps = c.prepareStatement("""
-                     INSERT INTO link_servers (code, display_name, blurb, color, icon, last_heartbeat)
-                     VALUES (?,?,?,?,?, FLOOR(UNIX_TIMESTAMP(NOW(3))*1000))
+                     INSERT INTO link_servers (code, display_name, short_name, blurb, color, icon, last_heartbeat)
+                     VALUES (?,?,?,?,?,?, FLOOR(UNIX_TIMESTAMP(NOW(3))*1000))
                      ON DUPLICATE KEY UPDATE display_name=VALUES(display_name),
+                     short_name=VALUES(short_name),
                      blurb=VALUES(blurb), color=VALUES(color), icon=VALUES(icon),
                      last_heartbeat=FLOOR(UNIX_TIMESTAMP(NOW(3))*1000)
                      """)) {
             ps.setString(1, code);
             ps.setString(2, name);
-            ps.setString(3, blurb == null ? "" : blurb);
-            ps.setString(4, color == null || color.isBlank() ? "LIGHT_BLUE" : color);
-            ps.setString(5, icon == null || icon.isBlank() ? "TERRACOTTA" : icon);
+            ps.setString(3, shortName == null ? "" : shortName);
+            ps.setString(4, blurb == null ? "" : blurb);
+            ps.setString(5, color == null || color.isBlank() ? "LIGHT_BLUE" : color);
+            ps.setString(6, icon == null || icon.isBlank() ? "TERRACOTTA" : icon);
             ps.executeUpdate();
         }
     }
@@ -279,12 +282,12 @@ public final class Store {
         List<Models.ServerRow> out = new ArrayList<>();
         try (Connection c = ds.getConnection();
              PreparedStatement ps = c.prepareStatement(
-                     "SELECT code, display_name, blurb, color, icon, last_heartbeat, FLOOR(UNIX_TIMESTAMP(NOW(3))*1000) AS db_now FROM link_servers")) {
+                     "SELECT code, display_name, short_name, blurb, color, icon, last_heartbeat, FLOOR(UNIX_TIMESTAMP(NOW(3))*1000) AS db_now FROM link_servers")) {
             ResultSet rs = ps.executeQuery();
             while (rs.next()) {
                 out.add(new Models.ServerRow(
                         rs.getString("code"), rs.getString("display_name"),
-                        nz(rs, "blurb"), nz(rs, "color"), nz(rs, "icon"),
+                        nz(rs, "short_name"), nz(rs, "blurb"), nz(rs, "color"), nz(rs, "icon"),
                         rs.getLong("last_heartbeat"), rs.getLong("db_now")));
             }
         }

@@ -199,7 +199,7 @@ public final class ESLinkPlugin extends JavaPlugin {
         Bukkit.getScheduler().runTaskTimerAsynchronously(this, () -> {
             try {
                 if (store != null && store.ready()) {
-                    store.heartbeat(serverCode(), serverName(), serverBlurb(), serverColor(), serverIcon());
+                    store.heartbeat(serverCode(), serverName(), serverShort(), serverBlurb(), serverColor(), serverIcon());
                     rememberServers(store.servers());
                     Compat.publish(this);
                     Compat.refresh(this);
@@ -285,6 +285,26 @@ public final class ESLinkPlugin extends JavaPlugin {
         return prettyName(serverCode(), getConfig().getString("server.name", ""));
     }
 
+    /** 聊天前缀用的短标签。空则用 code。 */
+    public String serverShort() {
+        return serverShortOf(serverCode(), getConfig().getString("server.short", ""));
+    }
+
+    public String serverShortOf(String code) {
+        if (code != null && code.equalsIgnoreCase(serverCode())) return serverShort();
+        if (code == null || code.isBlank()) return "?";
+        Models.ServerRow s = serverCache.get(code.toUpperCase(Locale.ROOT));
+        return serverShortOf(code, s == null ? null : s.shortName());
+    }
+
+    static String serverShortOf(String code, String shortName) {
+        if (shortName != null) {
+            String t = shortName.trim();
+            if (!t.isEmpty()) return t;
+        }
+        return code == null || code.isBlank() ? "?" : code.trim();
+    }
+
     public boolean guideWelcomed(Player p) {
         if (guideWelcomed.contains(p.getUniqueId())) return true;
         return GuideBook.seen(this, p);
@@ -343,6 +363,7 @@ public final class ESLinkPlugin extends JavaPlugin {
         for (Models.ServerRow s : serverCache.values()) {
             if (s.code() != null && s.code().equalsIgnoreCase(raw)) return s.code();
             if (s.name() != null && s.name().equalsIgnoreCase(raw)) return s.code();
+            if (s.shortName() != null && s.shortName().equalsIgnoreCase(raw)) return s.code();
             if (prettyName(s.code(), s.name()).equalsIgnoreCase(raw)) return s.code();
         }
         if (raw.equals("以太物语") || raw.equalsIgnoreCase("ES2")) return "ES2";

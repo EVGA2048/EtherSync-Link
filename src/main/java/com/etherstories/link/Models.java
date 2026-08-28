@@ -4,7 +4,7 @@ import java.util.UUID;
 
 public final class Models {
 
-    public record ServerRow(String code, String name, String blurb, String color, String icon, long heartbeat, long clock) {
+    public record ServerRow(String code, String name, String shortName, String blurb, String color, String icon, long heartbeat, long clock) {
         public boolean online(long offlineAfterMs) {
             if (heartbeat <= 0) return false;
             long age = clock - heartbeat;

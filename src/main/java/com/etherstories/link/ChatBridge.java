@@ -310,6 +310,7 @@ public final class ChatBridge {
         if (code == null) return false;
         List<String> list = csv(viewer, muteServersKey);
         if (list.contains(code.toLowerCase(Locale.ROOT))) return true;
+        if (list.contains(plugin.serverShortOf(code).toLowerCase(Locale.ROOT))) return true;
         return list.contains(plugin.prettyName(code).toLowerCase(Locale.ROOT));
     }
 
@@ -408,11 +409,11 @@ public final class ChatBridge {
             return;
         }
         String code = r.fromCode() == null ? "?" : r.fromCode();
-        String pfx = plugin.getConfig().getString("chat.prefix", "[{name}] ");
-        if (pfx == null) pfx = "[{name}] ";
-        String shown = r.fromName();
-        if (shown == null || shown.isBlank() || shown.equalsIgnoreCase(code)) shown = plugin.prettyName(code);
-        pfx = pfx.replace("{code}", code).replace("{name}", shown);
+        String pfx = plugin.getConfig().getString("chat.prefix", "[{short}] ");
+        if (pfx == null) pfx = "[{short}] ";
+        String shown = plugin.prettyName(code);
+        String tag = plugin.serverShortOf(code);
+        pfx = pfx.replace("{code}", code).replace("{short}", tag).replace("{name}", shown);
         String dye = ColorUtil.dye(plugin.serverColorOf(code));
         pfx = "&" + dye + pfx;
         String body = keepColor(raw);
@@ -438,7 +439,7 @@ public final class ChatBridge {
     private void deliverWhisper(Player dest, String fromCode, String fromName, String fromPlayer, String text) {
         if (dest == null || !dest.isOnline()) return;
         if (mutedServer(dest, fromCode) || mutedPlayer(dest, fromPlayer)) return;
-        String shown = fromName == null || fromName.isBlank() ? plugin.prettyName(fromCode) : fromName;
+        String shown = plugin.serverShortOf(fromCode);
         String who = fromPlayer == null ? "?" : fromPlayer;
         ChatMsg.tell(dest, "&d[私聊] &7[" + shown + "] &e" + who + "&f: " + text);
     }
@@ -473,7 +474,8 @@ public final class ChatBridge {
 
     public String localTag() {
         String dye = ColorUtil.dye(plugin.serverColor());
-        return ColorUtil.colorize("&" + dye + "[互通] ");
+        String tag = plugin.serverShort();
+        return ColorUtil.colorize("&" + dye + "[" + tag + "] ");
     }
 
     static String keepColor(String s) {

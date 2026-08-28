@@ -14,7 +14,7 @@ import java.util.Set;
 public final class ConfigUpdater {
 
     /** 与 config.yml 的 config-version 一起加 */
-    public static final int CURRENT_VERSION = 16;
+    public static final int CURRENT_VERSION = 17;
 
     private ConfigUpdater() {}
 
@@ -42,8 +42,8 @@ public final class ConfigUpdater {
             cfg.options().copyDefaults(true);
         }
 
-        if (fileVersion < 5 && "[{code}] ".equals(cfg.getString("chat.prefix"))) {
-            cfg.set("chat.prefix", "[{name}] ");
+        if (fileVersion < 17 && "[{name}] ".equals(cfg.getString("chat.prefix"))) {
+            cfg.set("chat.prefix", "[{short}] ");
             save = true;
         }
 

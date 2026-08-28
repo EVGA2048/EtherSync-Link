@@ -2,7 +2,7 @@
 # 新版本会自动补缺失的键，不会改你已经填过的值。
 # /link 大厅    /link chest    /link io    /link settings
 
-config-version: 16
+config-version: 17
 config:
   auto-fill-missing: true
 
@@ -14,8 +14,10 @@ mysql:
   password: ""
 
 server:
-  # 内部代号，唯一，只能字母数字。只给牌子箭头用，玩家界面不显示。
+  # 内部代号，唯一，只能字母数字。牌子配对用，玩家界面一般不显示。
   code: ES2
+  # 聊天前缀用的短标签，例如 ES2、SNC。空则用 code。
+  short: ""
   name: 以太物语
   blurb: Create 机械动力 · 生存建筑
   # 大厅标识：TERRACOTTA 陶瓦 / CONCRETE 混凝土
@@ -104,7 +106,7 @@ super-admins: []
 chat:
   enabled: true
   default: local
-  prefix: "[{name}] "
+  prefix: "[{short}] "
   max-length: 128
   item: true
   fast-window-seconds: 6
