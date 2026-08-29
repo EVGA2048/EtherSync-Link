@@ -62,13 +62,16 @@ public final class ChatTap implements Listener {
     @EventHandler
     public void onJoin(PlayerJoinEvent e) {
         inject(e.getPlayer());
-        if (plugin instanceof ESLinkPlugin es && es.store() != null && es.store().ready()) {
-            Player p = e.getPlayer();
-            Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
-                try {
-                    es.store().touchSeen(es.serverCode(), p.getUniqueId(), p.getName());
-                } catch (Exception ignored) {}
-            });
+        if (plugin instanceof ESLinkPlugin es) {
+            es.chat().applyWebAll(e.getPlayer());
+            if (es.store() != null && es.store().ready()) {
+                Player p = e.getPlayer();
+                Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+                    try {
+                        es.store().touchSeen(es.serverCode(), p.getUniqueId(), p.getName());
+                    } catch (Exception ignored) {}
+                });
+            }
         }
     }
 

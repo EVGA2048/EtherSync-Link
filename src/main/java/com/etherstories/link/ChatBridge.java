@@ -32,6 +32,8 @@ public final class ChatBridge {
     private final Map<UUID, Long> lastRemind = new ConcurrentHashMap<>();
     private final Map<UUID, Emit> pending = new ConcurrentHashMap<>();
     private final Map<UUID, String> lastSentBody = new ConcurrentHashMap<>();
+    /** 离线网页跨服开关；人在线时以 PDC 为准 */
+    private final Map<UUID, Boolean> webAll = new ConcurrentHashMap<>();
 
     static final int PRI_ARCLIGHT = 0;
     static final int PRI_LEGACY = 1;
@@ -55,21 +57,51 @@ public final class ChatBridge {
         ChatMsg.notice(p, text);
     }
 
+    public boolean defaultAll() {
+        return "all".equalsIgnoreCase(plugin.getConfig().getString("chat.default", "local"));
+    }
+
     public boolean isAll(Player p) {
         String v = p.getPersistentDataContainer().get(modeKey, PersistentDataType.STRING);
-        if (v == null || v.isBlank()) {
-            return "all".equalsIgnoreCase(plugin.getConfig().getString("chat.default", "local"));
-        }
+        if (v == null || v.isBlank()) return defaultAll();
         return "all".equalsIgnoreCase(v);
     }
 
+    public boolean isAll(UUID uuid) {
+        if (uuid == null) return defaultAll();
+        Player p = Bukkit.getPlayer(uuid);
+        if (p != null && p.isOnline()) return isAll(p);
+        return webAll.getOrDefault(uuid, defaultAll());
+    }
+
     public void setAll(Player p, boolean all) {
+        setAll(p, all, true);
+    }
+
+    public void setAll(Player p, boolean all, boolean notice) {
+        webAll.put(p.getUniqueId(), all);
         p.getPersistentDataContainer().set(modeKey, PersistentDataType.STRING, all ? "all" : "local");
+        if (!notice) return;
         if (all) {
             notice(p, "发言将发往全部互通服。过快发言不会传到其他服务器。可在大厅勾选要接收的服务器。");
         } else {
             notice(p, "发言仅本服可见，不会发往其他服务器。");
         }
+    }
+
+    public void setAll(UUID uuid, boolean all) {
+        if (uuid == null) return;
+        webAll.put(uuid, all);
+        Player p = Bukkit.getPlayer(uuid);
+        if (p != null && p.isOnline()) setAll(p, all, false);
+    }
+
+    /** 网页离线拨过的开关，进服写回 PDC，不弹提示。 */
+    public void applyWebAll(Player p) {
+        if (p == null) return;
+        Boolean pending = webAll.get(p.getUniqueId());
+        if (pending == null) return;
+        p.getPersistentDataContainer().set(modeKey, PersistentDataType.STRING, pending ? "all" : "local");
     }
 
     public void toggle(Player p) {
@@ -273,6 +305,33 @@ public final class ChatBridge {
                         p.getUniqueId(), p.getName(), text, itemKey, itemName, itemAmt, itemB64);
             } catch (Exception e) {
                 plugin.getLogger().warning("互通聊天发送失败: " + e.getMessage());
+            }
+        });
+    }
+
+    /** 网页发言：不经过游戏聊天包，直接写入互通库。人在线则走 send。 */
+    public void emitFromWeb(UUID uuid, String name, String raw) {
+        if (uuid == null || name == null || name.isBlank()) return;
+        if (!isAll(uuid)) return;
+        Player p = Bukkit.getPlayer(uuid);
+        if (p != null && p.isOnline()) {
+            send(p, raw, null);
+            return;
+        }
+        if (!plugin.getConfig().getBoolean("chat.enabled", true)) return;
+        if (!plugin.store().ready()) return;
+        String msg = keepColor(raw);
+        int max = Math.max(8, plugin.getConfig().getInt("chat.max-length", 128));
+        if (msg.length() > max) msg = msg.substring(0, max);
+        if (msg.isBlank()) return;
+        final String text = msg;
+        Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+            try {
+                if (plugin.store().banned(plugin.serverCode(), uuid)) return;
+                plugin.store().insertChat(plugin.serverCode(), plugin.serverName(),
+                        uuid, name, text, null, null, null, null);
+            } catch (Exception e) {
+                plugin.getLogger().warning("网页互通聊天发送失败: " + e.getMessage());
             }
         });
     }
