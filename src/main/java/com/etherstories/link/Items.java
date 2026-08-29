@@ -174,6 +174,33 @@ public final class Items {
         return stack;
     }
 
+
+    /** 菜单按钮标记：即使 Youer/Arclight 上 InventoryHolder 丢失，也能通过物品本身识别并锁定。 */
+    public static void markUi(Plugin plugin, ItemStack stack) {
+        markUi(plugin, stack, null);
+    }
+
+    /** 同时把 LinkHolder.kind 写进物品，holder 丢失时仍能恢复菜单类型并继续处理点击。 */
+    public static void markUi(Plugin plugin, ItemStack stack, String kind) {
+        if (stack == null || stack.getType().isAir()) return;
+        ItemMeta meta = stack.getItemMeta();
+        if (meta == null) return;
+        meta.getPersistentDataContainer().set(new NamespacedKey(plugin, "ui"), PersistentDataType.BYTE, (byte) 1);
+        if (kind != null && !kind.isBlank()) {
+            meta.getPersistentDataContainer().set(new NamespacedKey(plugin, "ui_kind"), PersistentDataType.STRING, kind);
+        }
+        stack.setItemMeta(meta);
+    }
+
+    public static boolean isUi(Plugin plugin, ItemStack stack) {
+        if (stack == null || stack.getType().isAir() || !stack.hasItemMeta()) return false;
+        return stack.getItemMeta().getPersistentDataContainer().has(new NamespacedKey(plugin, "ui"), PersistentDataType.BYTE);
+    }
+
+    public static String uiKind(Plugin plugin, ItemStack stack) {
+        if (stack == null || stack.getType().isAir() || !stack.hasItemMeta()) return null;
+        return stack.getItemMeta().getPersistentDataContainer().get(new NamespacedKey(plugin, "ui_kind"), PersistentDataType.STRING);
+    }
     public static String act(Plugin plugin, ItemStack stack) {
         if (stack == null || !stack.hasItemMeta()) return "";
         String v = stack.getItemMeta().getPersistentDataContainer()

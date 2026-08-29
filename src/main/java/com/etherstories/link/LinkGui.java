@@ -17,6 +17,12 @@ public final class LinkGui {
 
     public LinkGui(ESLinkPlugin plugin) { this.plugin = plugin; }
 
+    /** 打开前给所有格子打 UI 标记；Youer/Arclight 上 holder 丢失时仍能靠 PDC 识别并继续处理点击。 */
+    private void openGui(Player p, Inventory inv, String kind) {
+        for (ItemStack item : inv.getContents()) Items.markUi(plugin, item, kind);
+        p.openInventory(inv);
+    }
+
     public void openHome(Player p) {
         Sessions.State st = plugin.sessions().of(p);
         st.page = Sessions.Page.HOME;
@@ -132,7 +138,7 @@ public final class LinkGui {
                 }
                 boolean first = !plugin.guideWelcomed(p);
                 inv.setItem(49, tag("guide", "", 0, GuideBook.icon(first)));
-                p.openInventory(inv);
+                openGui(p, inv, h.kind);
                 if (first) {
                     plugin.markGuideWelcomed(p);
                     plugin.msg(p, "欢迎使用互通大厅。可打开下方说明书，或输入 /link help。");
@@ -230,7 +236,7 @@ public final class LinkGui {
                     inv.setItem(52, tag("claim", "", 0, Items.named(Material.TRIPWIRE_HOOK, "&e取件",
                             List.of("&7输入 6 位取件码", "&8可代领"))));
                 }
-                p.openInventory(inv);
+                openGui(p, inv, h.kind);
             });
         });
     }
@@ -289,7 +295,7 @@ public final class LinkGui {
                             (sel ? "&e" : (on ? "&a" : "&8")) + title, lore)));
                 }
                 inv.setItem(49, tag("home", "", 0, Items.named(Material.OAK_DOOR, "&7返回大厅", null)));
-                p.openInventory(inv);
+                openGui(p, inv, h.kind);
             });
         });
     }
@@ -322,7 +328,7 @@ public final class LinkGui {
                     inv.setItem(i, listingIcon(L, hint, p));
                 }
                 inv.setItem(49, tag("home", "", 0, Items.named(Material.OAK_DOOR, "&7返回", null)));
-                p.openInventory(inv);
+                openGui(p, inv, h.kind);
             });
         });
     }
@@ -367,7 +373,7 @@ public final class LinkGui {
                     inv.setItem(51, tag("wipe", seller.toString(), 0,
                             Items.named(Material.TNT, "&c强制下架其全部", List.of("&7货不会自动退回", "&7人在本服再自己处理"))));
                 }
-                p.openInventory(inv);
+                openGui(p, inv, h.kind);
             });
         });
     }
@@ -437,7 +443,7 @@ public final class LinkGui {
                 } else {
                     inv.setItem(15, tag("buy-yes", "", L.id(), Items.named(Material.LIME_CONCRETE, "&a确认购买", buyLore)));
                 }
-                p.openInventory(inv);
+                openGui(p, inv, h.kind);
             });
         });
     }
@@ -474,7 +480,7 @@ public final class LinkGui {
                 inv.setItem(22, tag("pair-cancel", "", 0, Items.named(Material.BARRIER, "&c取消配对",
                         List.of("&7箱子还在，以后再连", "&8也可关掉界面，聊天输入对端 UNIT"))));
                 st.awaitingPair = true;
-                p.openInventory(inv);
+                openGui(p, inv, h.kind);
                 plugin.msg(p, "选对面的服，或聊天输入对端 UNIT（牌子上那串）。cancel 取消。");
             });
         });
@@ -522,7 +528,7 @@ public final class LinkGui {
                 }
                 inv.setItem(49, tag("pair-back", "", 0, Items.named(Material.ARROW, "&7返回",
                         List.of("&8重新选择服务器"))));
-                p.openInventory(inv);
+                openGui(p, inv, h.kind);
             });
         });
     }
@@ -564,7 +570,7 @@ public final class LinkGui {
                                     "&8选择配对"))));
                 }
                 inv.setItem(49, tag("pair-back", "", 0, Items.named(Material.ARROW, "&7返回", null)));
-                p.openInventory(inv);
+                openGui(p, inv, h.kind);
             });
         });
     }
@@ -1063,7 +1069,7 @@ public final class LinkGui {
                     inv.setItem(slots[i], tag("claim-who", s.uuid().toString(), row.id(), skull));
                 }
                 inv.setItem(18, tag("claim", "", 0, Items.named(Material.ARROW, "&7重新输入取件码", null)));
-                p.openInventory(inv);
+                openGui(p, inv, h.kind);
             });
         });
     }
@@ -1298,7 +1304,7 @@ public final class LinkGui {
                                     "&8按当前汇率一次性取出"))));
                 }
                 inv.setItem(22, tag("home", "", 0, Items.named(Material.OAK_DOOR, "&7返回大厅", null)));
-                p.openInventory(inv);
+                openGui(p, inv, h.kind);
             });
         });
     }
@@ -1729,7 +1735,7 @@ public final class LinkGui {
             inv.setItem(22, Items.named(Material.MAP, "&7未登记",
                     List.of("&7先选发送或接收")));
         }
-        p.openInventory(inv);
+        openGui(p, inv, h.kind);
     }
 
     private static String oppositeRole(String role) {
@@ -1802,7 +1808,7 @@ public final class LinkGui {
                             List.of("&7看准箱子 /link chest", "&7看准红石灯 /link io")));
                 }
                 inv.setItem(49, tag("home", "", 0, Items.named(Material.OAK_DOOR, "&7返回大厅", null)));
-                p.openInventory(inv);
+                openGui(p, inv, h.kind);
             });
         });
     }
@@ -1902,7 +1908,7 @@ public final class LinkGui {
                             lore)));
                 }
                 inv.setItem(49, tag("home", "", 0, Items.named(Material.OAK_DOOR, "&7返回大厅", null)));
-                p.openInventory(inv);
+                openGui(p, inv, h.kind);
             });
         });
     }
@@ -1984,7 +1990,7 @@ public final class LinkGui {
                     List.of("&7删除调试残留或不存在的服", "&8不会删本服"))));
         }
         inv.setItem(40, tag("home", "", 0, Items.named(Material.OAK_DOOR, "&7返回大厅", null)));
-        p.openInventory(inv);
+        openGui(p, inv, h.kind);
     }
 
     public void openAdminNodes(Player p) {
@@ -2055,7 +2061,7 @@ public final class LinkGui {
                 inv.setItem(45, Items.named(Material.PAPER, "&f共 " + (cs.size() + ns.size()) + " 个",
                         List.of("&7幽灵 " + ghosts + " 个", "&8右键删除登记")));
                 inv.setItem(49, tag("settings", "", 0, Items.named(Material.ARROW, "&7返回设置", null)));
-                p.openInventory(inv);
+                openGui(p, inv, h.kind);
             });
         });
     }
@@ -2089,7 +2095,7 @@ public final class LinkGui {
                     List.of(sel ? "&a当前使用" : "&8点击设为本服颜色"))));
         }
         inv.setItem(22, tag("settings", "", 0, Items.named(Material.ARROW, "&7返回设置", null)));
-        p.openInventory(inv);
+        openGui(p, inv, h.kind);
     }
 
     public void openServers(Player p) {
@@ -2134,7 +2140,7 @@ public final class LinkGui {
                                     lore)));
                 }
                 inv.setItem(49, tag("settings", "", 0, Items.named(Material.ARROW, "&7返回设置", null)));
-                p.openInventory(inv);
+                openGui(p, inv, h.kind);
             });
         });
     }

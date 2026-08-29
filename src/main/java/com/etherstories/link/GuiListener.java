@@ -6,8 +6,14 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
+import org.bukkit.event.inventory.InventoryCloseEvent;
+import org.bukkit.event.inventory.InventoryCreativeEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
+import org.bukkit.event.inventory.PrepareItemCraftEvent;
+import org.bukkit.event.entity.EntityPickupItemEvent;
+import org.bukkit.event.player.PlayerDropItemEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 
 import java.util.UUID;
@@ -22,16 +28,100 @@ public final class GuiListener implements Listener {
         plugin.sessions().clear(e.getPlayer());
     }
 
+    private void sweepUiItems(org.bukkit.entity.HumanEntity who) {
+        if (!(who instanceof Player p)) return;
+        ItemStack[] contents = p.getInventory().getContents();
+        boolean changed = false;
+        for (int i = 0; i < contents.length; i++) {
+            if (Items.isUi(plugin, contents[i])) {
+                contents[i] = null;
+                changed = true;
+            }
+        }
+        if (changed) p.getInventory().setContents(contents);
+        ItemStack cursor = p.getItemOnCursor();
+        if (Items.isUi(plugin, cursor)) p.setItemOnCursor(null);
+    }
+
+    @EventHandler
+    public void onClose(InventoryCloseEvent e) {
+        if (e.getView().getTopInventory().getHolder() instanceof LinkHolder
+                || containsUi(e.getView().getTopInventory())) {
+            sweepUiItems(e.getPlayer());
+        }
+    }
+
+    @EventHandler
+    public void onDrop(PlayerDropItemEvent e) {
+        if (!Items.isUi(plugin, e.getItemDrop().getItemStack())) return;
+        e.setCancelled(true);
+        e.getItemDrop().remove();
+        sweepUiItems(e.getPlayer());
+    }
+
+    @EventHandler
+    public void onPickup(EntityPickupItemEvent e) {
+        if (!(e.getEntity() instanceof Player p)) return;
+        if (!Items.isUi(plugin, e.getItem().getItemStack())) return;
+        e.setCancelled(true);
+        e.getItem().remove();
+        sweepUiItems(p);
+    }
+
+    @EventHandler
+    public void onCreative(InventoryCreativeEvent e) {
+        if (e.getView().getTopInventory().getHolder() instanceof LinkHolder
+                || Items.isUi(plugin, e.getCurrentItem())
+                || Items.isUi(plugin, e.getCursor())) {
+            e.setCancelled(true);
+            sweepUiItems(e.getWhoClicked());
+        }
+    }
+
+    @EventHandler
+    public void onCraft(PrepareItemCraftEvent e) {
+        if (containsUi(e.getInventory())) e.getInventory().setResult(null);
+    }
+
+    private boolean containsUi(Inventory inv) {
+        for (ItemStack item : inv.getContents()) {
+            if (Items.isUi(plugin, item)) return true;
+        }
+        return false;
+    }
+
     @EventHandler
     public void onDrag(InventoryDragEvent e) {
-        if (e.getInventory().getHolder() instanceof LinkHolder) e.setCancelled(true);
+        if (e.getInventory().getHolder() instanceof LinkHolder) {
+            e.setCancelled(true);
+            return;
+        }
+        if (Items.isUi(plugin, e.getOldCursor()) || Items.isUi(plugin, e.getCursor())
+                || e.getNewItems().values().stream().anyMatch(it -> Items.isUi(plugin, it))) {
+            e.setCancelled(true);
+            sweepUiItems(e.getWhoClicked());
+        }
     }
 
     @EventHandler
     public void onClick(InventoryClickEvent e) {
-        if (!(e.getInventory().getHolder() instanceof LinkHolder holder)) return;
+        LinkHolder holder = null;
+        boolean synthetic = false;
+        if (e.getInventory().getHolder() instanceof LinkHolder h) {
+            holder = h;
+        } else {
+            String kind = Items.uiKind(plugin, e.getCurrentItem());
+            if (kind == null) kind = Items.uiKind(plugin, e.getCursor());
+            if (kind == null) return;
+            holder = new LinkHolder(kind);
+            synthetic = true;
+        }
         e.setCancelled(true);
-        if (!(e.getWhoClicked() instanceof Player p)) return;
+        if (!(e.getWhoClicked() instanceof Player p)) {
+            if (synthetic) sweepUiItems(e.getWhoClicked());
+            return;
+        }
+        if (synthetic) sweepUiItems(p);
         if (e.getClickedInventory() == null || e.getClickedInventory() != e.getView().getTopInventory()) return;
         ItemStack stack = e.getCurrentItem();
         String act = Items.act(plugin, stack);
