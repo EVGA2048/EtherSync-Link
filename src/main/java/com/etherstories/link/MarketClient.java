@@ -39,7 +39,8 @@ final class MarketClient {
         return o;
     }
 
-    void heartbeat(String code, String name, String blurb, String color, String icon, double linkRate) throws Exception {
+    JsonObject heartbeat(String code, String name, String blurb, String color, String icon,
+                         double linkRate, boolean pinRate, String rateMode) throws Exception {
         JsonObject body = new JsonObject();
         body.addProperty("code", code);
         body.addProperty("name", name);
@@ -47,9 +48,12 @@ final class MarketClient {
         body.addProperty("color", color);
         body.addProperty("icon", icon);
         body.addProperty("link_rate", linkRate <= 0 ? 1 : linkRate);
+        if (pinRate) body.addProperty("pin_rate", true);
+        if (rateMode != null && !rateMode.isBlank()) body.addProperty("rate_mode", rateMode);
         JsonObject o = post("/v1/heartbeat", body);
         if (o.has("name")) hub.name = o.get("name").getAsString();
         markOk();
+        return o;
     }
 
     List<Models.ServerRow> servers() throws Exception {
@@ -148,9 +152,14 @@ final class MarketClient {
         }
     }
 
-    Models.Listing claim(long id) throws Exception {
+    Models.Listing claim(long id, UUID buyer, String buyerName, String buyerServer, boolean pickup) throws Exception {
+        JsonObject body = new JsonObject();
+        if (buyer != null) body.addProperty("buyer_uuid", buyer.toString());
+        if (buyerName != null) body.addProperty("buyer_name", buyerName);
+        if (buyerServer != null && !buyerServer.isBlank()) body.addProperty("buyer_server", buyerServer);
+        body.addProperty("kind", pickup ? "pickup" : "buy");
         try {
-            JsonObject o = post("/v1/listings/" + id + "/claim", new JsonObject());
+            JsonObject o = post("/v1/listings/" + id + "/claim", body);
             markOk();
             return o.has("listing") ? readListing(o.getAsJsonObject("listing")) : null;
         } catch (HttpStatus e) {

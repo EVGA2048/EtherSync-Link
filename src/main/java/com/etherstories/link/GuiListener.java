@@ -268,6 +268,15 @@ public final class GuiListener implements Listener {
                 plugin.setLinkRate(plugin.linkRate() + step);
                 plugin.gui().openSettings(p);
             }
+            case "rate-mode" -> {
+                if (!p.hasPermission("eslink.admin")) return;
+                if (plugin.markets() == null || !plugin.markets().httpEnabled()) {
+                    plugin.msg(p, "未接货栈，汇率只写在本服配置里。");
+                    return;
+                }
+                plugin.setMarketRateFollow(!plugin.marketRateAuto());
+                plugin.gui().openSettings(p);
+            }
             case "colors" -> plugin.gui().openColors(p);
             case "set-color" -> {
                 if (!p.hasPermission("eslink.admin")) return;

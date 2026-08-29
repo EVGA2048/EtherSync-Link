@@ -38,6 +38,7 @@ public final class ESLinkPlugin extends JavaPlugin {
     private NamespacedKey claimMissKey;
     private NamespacedKey claimMissLockKey;
     private NamespacedKey claimHeadLockKey;
+    private volatile String marketRateMode = "";
 
     @Override
     public void onEnable() {
@@ -222,17 +223,19 @@ public final class ESLinkPlugin extends JavaPlugin {
         ioEnabled = getConfig().getBoolean("io.enabled", true);
         if (!ioEnabled) getLogger().warning("互通红石已在 config.yml 里关闭（io.enabled: false）");
         if (ioEnabled) {
+            long pulse = Math.max(1, getConfig().getLong("io.pulse-ticks", 2));
             Bukkit.getScheduler().runTaskTimer(this, () -> {
                 if (io != null) io.pulse();
-            }, 1L, 1L);
+            }, pulse, pulse);
             Bukkit.getScheduler().runTaskTimer(this, () -> {
                 if (io != null) io.poll();
-            }, 20L, 5L);
+            }, 20L, 10L);
         }
+        long paint = Math.max(20, getConfig().getLong("io.paint-ticks", 40));
         Bukkit.getScheduler().runTaskTimer(this, () -> {
             if (chests != null) chests.paint();
             if (ioEnabled && io != null) io.paint();
-        }, 20L, 20L);
+        }, paint, paint);
         Bukkit.getScheduler().runTaskTimerAsynchronously(this, () -> {
             if (chat != null) chat.poll();
             if (alerts != null) alerts.poll();
@@ -637,15 +640,50 @@ public final class ESLinkPlugin extends JavaPlugin {
         if (rate > 1000) rate = 1000;
         getConfig().set("trade.link-rate", roundMoney(rate));
         saveConfig();
+        marketRateMode = "manual";
         Bukkit.getScheduler().runTaskAsynchronously(this, () -> {
             try {
                 if (store != null && store.ready()) {
                     store.heartbeat(serverCode(), serverName(), serverShort(), serverBlurb(),
                             serverColor(), serverIcon(), linkRate());
                 }
-                if (markets != null) markets.heartbeatAll();
+                if (markets != null) markets.heartbeatAll(true, "manual");
             } catch (Exception ignored) {}
         });
+    }
+
+    public void setMarketRateFollow(boolean auto) {
+        if (markets == null || !markets.httpEnabled()) {
+            marketRateMode = "local";
+            return;
+        }
+        marketRateMode = auto ? "auto" : "manual";
+        Bukkit.getScheduler().runTaskAsynchronously(this, () -> {
+            try {
+                markets.heartbeatAll(!auto, auto ? "auto" : "manual");
+            } catch (Exception ignored) {}
+        });
+    }
+
+    public String marketRateMode() {
+        if (marketRateMode == null || marketRateMode.isBlank()) {
+            return (markets != null && markets.httpEnabled()) ? "auto" : "local";
+        }
+        return marketRateMode;
+    }
+
+    public boolean marketRateAuto() {
+        return "auto".equalsIgnoreCase(marketRateMode());
+    }
+
+    public void onMarketRate(double rate, String mode) {
+        if (mode != null && !mode.isBlank()) marketRateMode = mode;
+        if (!"auto".equalsIgnoreCase(marketRateMode)) return;
+        if (rate <= 0) return;
+        double r = roundMoney(rate);
+        if (Math.abs(r - linkRate()) < 0.005) return;
+        getConfig().set("trade.link-rate", r);
+        saveConfig();
     }
 
     public String linkRateText() {

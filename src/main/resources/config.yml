@@ -2,7 +2,7 @@
 # 新版本会自动补缺失的键，不会改你已经填过的值。
 # /link 大厅    /link chest    /link io    /link settings
 
-config-version: 21
+config-version: 22
 config:
   auto-fill-missing: true
 
@@ -63,6 +63,10 @@ blocked-components: []
 io:
   # 出问题时的总开关：false = 完全不跑红石，箱子照常。
   enabled: true
+  # 读电平间隔。1=每 tick（旧，伤 TPS），2=够用。
+  pulse-ticks: 2
+  # 刷牌子间隔。20=每秒（旧），40=两秒。
+  paint-ticks: 40
   keepalive-ms: 1000
   stale-ms: 5000
 
@@ -86,7 +90,7 @@ trade:
   self-buy-surcharge: 0
   self-buy-cooldown-seconds: 20
   self-buy-daily: 12
-  # 1 本服货币 = link-rate 互通货币。例如 1:1.5 填 1.5。货单按互通计价，买家界面换算成本服（含税）。
+  # 1 本服货币 = link-rate 互通货币。例如 1:1.5 填 1.5。接独立货栈时默认按成交自动调，游戏里 ± 会钉成手动。
   link-rate: 1
   # 互通钱包：本服按汇率存入，到另一台服按当地汇率取出。走共享 MySQL，同一 UUID。
   wallet: true

@@ -264,7 +264,11 @@ public final class IoNet {
     }
 
     public void paint() {
-        for (Models.IoRow n : local.values()) refreshSign(n);
+        for (Models.IoRow n : local.values()) {
+            Block b = block(n);
+            if (b == null || !loaded(b)) continue;
+            refreshSign(n);
+        }
     }
 
     public Models.IoRow cachedAt(String world, int x, int y, int z) {
@@ -278,7 +282,7 @@ public final class IoNet {
         if (n == null) return;
         local.put(n.id(), n);
         Block b = block(n);
-        if (b == null) return;
+        if (b == null || !loaded(b)) return;
         Sign sign = ChestListener.findSign(b);
         if (sign == null) sign = ChestListener.ensureSign(b, null);
         String other = (n.pairCode() == null || n.pairCode().isBlank()) ? "" : otherServer(n.pairCode());

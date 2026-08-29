@@ -1,0 +1,693 @@
+<!doctype html><html lang=zh-CN><head>
+<meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
+<title>EtherSync · MARKET</title>
+<style>
+:root{
+  --cobalt:#0A2A8C;--deep:#071C5C;--jiqing:#1F7A86;--ice:#D8E1F7;
+  --paper:#F3F5F7;--white:#fff;--gray:#C4C8CE;--ink:#161A20;--dim:#5A6068;
+  --warn:#c7383d;--lamp:2px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%}
+body{
+  color:var(--ink);
+  font:14px/1.5 "PingFang SC","SF Pro Text",system-ui,-apple-system,sans-serif;
+  background:var(--paper);
+  background-image:
+    linear-gradient(rgba(10,42,140,.07) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(10,42,140,.07) 1px,transparent 1px);
+  background-size:24px 24px;
+}
+body:before{
+  content:"";position:fixed;top:0;left:0;right:0;height:2px;background:var(--cobalt);z-index:4;
+}
+.app{position:relative;max-width:1180px;margin:0 auto;padding:28px 28px 48px}
+@media(max-width:720px){.app{padding:16px 14px 40px}}
+a{color:var(--cobalt);text-decoration:none}a:hover{text-decoration:underline}
+code{font:12px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:var(--ice);padding:1px 5px}
+
+.top{display:flex;align-items:center;gap:14px 18px;flex-wrap:wrap;
+  padding-bottom:16px;border-bottom:1px solid var(--gray);margin-bottom:20px}
+.brand{display:flex;align-items:center;gap:10px;min-width:0}
+.mark{width:24px;height:24px;flex:none}
+.brand-txt{display:flex;flex-direction:column;gap:2px}
+.brand-txt b{font:500 15px/1.1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.16em}
+.brand-txt span{font:10px/1.2 ui-monospace,Menlo,monospace;letter-spacing:.14em;color:var(--dim)}
+h1{margin:0;flex:1 1 140px;min-width:0;font:500 26px/1.1 "PingFang SC","SF Pro Text",system-ui,sans-serif;
+  color:var(--deep);letter-spacing:.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tools{display:flex;align-items:center;gap:12px;margin-left:auto}
+.clock{font:11px/1 ui-monospace,Menlo,monospace;letter-spacing:.12em;color:var(--dim);min-width:68px;text-align:right}
+.lang{display:flex;gap:0;border:1px solid rgba(10,42,140,.25);background:var(--white)}
+.lang button{min-width:38px;padding:7px 11px;box-shadow:none!important;background:transparent;letter-spacing:.1em;
+  font:10px/1 ui-monospace,Menlo,monospace;font-weight:600}
+.lang button:hover:not(.on){background:var(--ice)}
+.lang button.on{background:var(--cobalt);color:var(--white)}
+.nav{display:flex;gap:6px;flex-wrap:wrap}
+@media(max-width:800px){
+  h1{flex-basis:100%;order:2;font-size:22px}
+  .tools{order:1;margin-left:auto}
+  .nav{order:3;width:100%;overflow-x:auto;flex-wrap:nowrap;-webkit-overflow-scrolling:touch;padding-bottom:2px}
+  .nav button{flex:0 0 auto}
+}
+
+.key,.ghost,.nav button,button.block,.lang button{
+  position:relative;appearance:none;border:0;cursor:pointer;font:inherit;
+  padding:8px 12px 8px 14px;background:var(--white);color:var(--ink);
+  box-shadow:inset var(--lamp) 0 0 0 var(--gray);letter-spacing:.08em;
+}
+.nav button{font:11px/1 ui-monospace,Menlo,monospace;letter-spacing:.14em;background:var(--ice);color:var(--deep)}
+.nav button.on,.ghost.primary,.key.on{
+  background:var(--cobalt);color:var(--white);box-shadow:inset var(--lamp) 0 0 0 var(--jiqing)
+}
+.key:hover,.ghost:hover,.nav button:hover{box-shadow:inset var(--lamp) 0 0 0 var(--jiqing)}
+.key:active,.ghost:active,.nav button:active,button.block:active,.lang button:active{transform:translateY(1px)}
+button.block{width:100%;margin-top:16px;padding:12px 14px;background:var(--cobalt);color:var(--white);
+  letter-spacing:.16em;font:12px ui-monospace,Menlo,monospace;box-shadow:inset var(--lamp) 0 0 0 var(--jiqing)}
+button.danger{width:100%;margin-top:14px;padding:10px;background:transparent;color:var(--warn);
+  border:1px solid var(--warn);box-shadow:none;font:inherit;cursor:pointer}
+
+.panel{background:var(--white);border:1px solid var(--gray);padding:20px 20px 18px}
+@media(min-width:900px){.panel{padding:24px 26px 20px}}
+.kicker{display:inline-block;background:var(--cobalt);color:var(--white);font:10px/1 ui-monospace,Menlo,monospace;
+  letter-spacing:.16em;padding:6px 11px 6px 13px;box-shadow:inset var(--lamp) 0 0 0 var(--jiqing);margin-bottom:14px}
+.hint{color:var(--dim);font-size:12px;line-height:1.6;margin-top:14px}
+
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.dash-split{display:grid;gap:18px;margin-top:4px}
+@media(min-width:960px){.dash-split{grid-template-columns:1.35fr .9fr;align-items:start}}
+.card,.stat{background:var(--paper);border:1px solid var(--gray);padding:13px 14px 13px 16px;min-height:80px;
+  box-shadow:inset var(--lamp) 0 0 0 var(--ice)}
+.card .k,.stat .k{font:10px/1.2 ui-monospace,Menlo,monospace;letter-spacing:.14em;color:var(--dim)}
+.card .v,.stat .v{margin-top:10px;font:600 18px/1.2 ui-monospace,Menlo,monospace;color:var(--cobalt);word-break:break-all}
+.rate-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px}
+.rate{box-shadow:inset var(--lamp) 0 0 0 var(--jiqing)}
+.rate .v{font-size:30px;color:var(--deep)}
+.bar{height:3px;margin-top:12px;background:rgba(196,200,206,.55);overflow:hidden}
+.bar i{display:block;height:100%;background:var(--jiqing);width:0}
+.twin{display:flex;height:3px;margin-top:8px;background:rgba(196,200,206,.55);overflow:hidden}
+.twin b{display:block;height:100%;background:var(--jiqing)}
+.twin em{display:block;height:100%;background:var(--warn);font-style:normal}
+.chart{margin-top:4px;background:var(--paper);border:1px solid var(--gray);padding:12px 12px 8px}
+.chart svg{display:block;width:100%;height:148px}
+.chart.mini{padding:8px 0 0;border:0;background:transparent;margin:0}
+.chart.mini svg{height:36px}
+.legend{display:flex;gap:12px;flex-wrap:wrap;margin-top:8px;font:10px/1.2 ui-monospace,Menlo,monospace;letter-spacing:.1em}
+.legend i{display:inline-block;width:10px;height:2px;margin-right:6px;vertical-align:middle}
+.flow{display:grid;grid-template-columns:minmax(88px,auto) 1fr auto;gap:10px;align-items:center;
+  padding:10px 14px;border-bottom:1px solid var(--gray)}
+.flow:last-child{border:0}
+.flow .bar{margin:0}
+.chips{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+.chips input{flex:1;min-width:160px;margin:0}
+.chipset{display:flex;gap:6px;flex-wrap:wrap}
+.list.short{max-height:min(32vh,280px)}
+.actions{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:14px}
+.actions input{width:96px;flex:0 0 auto}
+
+label{display:block;color:var(--dim);font:10px/1.2 ui-monospace,Menlo,monospace;letter-spacing:.14em;margin:12px 0 4px}
+input,select{width:100%;padding:10px 12px;background:var(--white);color:var(--ink);
+  border:1px solid var(--gray);font:inherit;border-radius:0}
+input:focus,select:focus{outline:1px solid var(--cobalt);border-color:var(--cobalt)}
+.formgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px 14px}
+@media(max-width:800px){.formgrid{grid-template-columns:1fr 1fr}}
+@media(max-width:480px){.formgrid{grid-template-columns:1fr}}
+
+.list{border:1px solid var(--gray);background:var(--paper);max-height:min(52vh,480px);overflow:auto}
+.item{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px 16px;padding:12px 14px;
+  border-bottom:1px solid var(--gray);align-items:baseline}
+.item:last-child{border:0}
+.item .who{display:block;font:13px/1.45 "PingFang SC","SF Pro Text",system-ui,sans-serif}
+.item .meta{color:var(--dim);font:12px ui-monospace,Menlo,monospace;white-space:nowrap}
+@media(max-width:560px){
+  .item{grid-template-columns:1fr;gap:4px}
+  .item .meta{white-space:normal}
+}
+.badge{display:inline-block;margin-left:8px;padding:2px 7px;font:9px ui-monospace,Menlo,monospace;
+  letter-spacing:.1em;color:var(--white);background:var(--deep);vertical-align:middle}
+.badge.mute{background:var(--dim)}
+.dot{display:inline-block;width:7px;height:7px;margin-right:6px;background:var(--gray);vertical-align:middle}
+.dot.on{background:var(--jiqing)}
+
+@media(min-width:800px){#viewLogin.panel{margin:56px auto 0;max-width:440px}}
+.rail{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin:-8px 0 12px;
+  font:10px/1.3 ui-monospace,Menlo,monospace;letter-spacing:.12em;color:var(--dim)}
+.rail b{color:var(--cobalt);font-weight:600}
+.rail i{width:6px;height:6px;background:var(--jiqing);display:inline-block;margin-right:6px;vertical-align:middle}
+.rail i.off{background:var(--gray)}
+.tape{
+  display:flex;align-items:stretch;margin:0 0 18px;min-height:32px;
+  background:var(--deep);color:var(--ice);
+  box-shadow:inset var(--lamp) 0 0 0 var(--jiqing),inset 0 1px 0 rgba(216,225,247,.28);
+}
+.tape-tag{
+  flex:none;background:var(--jiqing);color:#fff;
+  font:10px/1 ui-monospace,Menlo,monospace;letter-spacing:.2em;font-weight:600;
+  padding:0 12px;display:flex;align-items:center;
+}
+.tape-view{flex:1;overflow:hidden;min-width:0}
+.tape-track{
+  display:flex;width:max-content;
+  font:12px/32px ui-monospace,Menlo,Consolas,monospace;letter-spacing:.06em;
+  animation:tape 36s linear infinite;
+}
+.tape-track span{white-space:nowrap;padding:0 22px}
+.tape-track span:before{content:"// ";color:var(--jiqing)}
+.tape:hover .tape-track{animation-play-state:paused}
+@keyframes tape{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+@media(prefers-reduced-motion:reduce){
+  .tape-track{animation:none;flex-wrap:wrap;width:auto}
+}
+.foot{margin-top:22px;padding-top:12px;border-top:1px solid var(--gray);
+  font:10px/1.4 ui-monospace,Menlo,monospace;letter-spacing:.12em;color:var(--dim);
+  display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
+
+.hidden{display:none!important}
+#toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);z-index:5;
+  background:var(--cobalt);color:#fff;padding:10px 16px 10px 18px;font:12px ui-monospace,Menlo,monospace;
+  letter-spacing:.08em;display:none;box-shadow:inset var(--lamp) 0 0 0 var(--jiqing)}
+</style></head><body>
+<div class=app>
+  <header class=top>
+    <div class=brand>
+      <svg class=mark viewBox="0 0 22 22" aria-hidden=true>
+        <path fill="#D8E1F7" d="M0 0h22L0 22z"/>
+        <path fill="#0A2A8C" d="M22 0v22H0z"/>
+      </svg>
+      <div class=brand-txt>
+        <b>// ETHERSYNC</b>
+        <span>MARKET</span>
+      </div>
+    </div>
+    <h1 id=title>货栈</h1>
+    <div class=tools>
+      <div class=clock id=clock></div>
+      <div class=lang id=langBar>
+        <button type=button data-lang=zh id=btnZh title=中文>中</button>
+        <button type=button data-lang=en id=btnEn title=English>EN</button>
+      </div>
+    </div>
+    <nav class="nav hidden" id=nav>
+      <button type=button data-view=dash id=btnDash data-i18n=navDash>OVERVIEW</button>
+      <button type=button data-view=rates id=btnRates data-i18n=navRates>RATES</button>
+      <button type=button data-view=list id=btnList data-i18n=navList>LISTINGS</button>
+      <button type=button data-view=servers id=btnServers data-i18n=navServers>SERVERS</button>
+      <button type=button data-view=trades id=btnTrades data-i18n=navTrades>TRADES</button>
+      <button type=button data-view=config id=btnConfig data-i18n=navConfig>CONFIG</button>
+    </nav>
+  </header>
+  <div class="rail hidden" id=rail>
+    <span><i id=railDot></i><b id=railLive></b></span>
+    <span id=railMeta></span>
+  </div>
+  <div class=tape id=tape>
+    <div class=tape-tag data-i18n=tapeTag>TAPE</div>
+    <div class=tape-view>
+      <div class=tape-track id=tapeTrack></div>
+    </div>
+  </div>
+
+  <section id=viewLogin class=panel>
+    <div class=kicker data-i18n=kickLogin>JOIN TOKEN</div>
+    <div class=hint id=loginHint></div>
+    <form id=loginForm>
+      <label data-i18n=labToken>TOKEN</label><input id=tokenInput type=password autocomplete=off>
+      <button class=block type=submit data-i18n=btnEnter>ENTER</button>
+    </form>
+  </section>
+
+  <section id=viewDash class="panel hidden">
+    <div class=kicker data-i18n=kickLive>LIVE STATUS</div>
+    <div class=dash-split>
+      <div>
+        <div class=stats id=dashCards></div>
+        <div class=kicker style=margin-top:20px data-i18n=kickChart>RATE PATH</div>
+        <div class=chart id=fxChart></div>
+        <div class=kicker style=margin-top:20px data-i18n=kickFx>FX WINDOW</div>
+        <div class=stats id=fxCards></div>
+        <div class=hint data-i18n=hintFx>成交会推高卖方服务器汇率。买得多的服汇率回落。下架和自己取回不计入。</div>
+      </div>
+      <div>
+        <div class=kicker data-i18n=kickRecent>RECENT</div>
+        <div class="list short" id=dashTrades></div>
+        <div class=kicker style=margin-top:18px data-i18n=kickStock>ON SHELF</div>
+        <div class="list short" id=dashListings></div>
+      </div>
+    </div>
+    <div class=kicker style=margin-top:20px data-i18n=kickFlow>SERVER FLOW</div>
+    <div class=list id=flowList></div>
+  </section>
+
+  <section id=viewRates class="panel hidden">
+    <div class=kicker data-i18n=kickRates>PER SERVER RATE</div>
+    <div class=rate-grid id=rateList></div>
+    <div class=hint data-i18n=hintRates>AUTO：按近窗成交自动调，基准是切入自动时的汇率。MANUAL：钉死，游戏里 ± 也会变成手动。</div>
+  </section>
+
+  <section id=viewList class="panel hidden">
+    <div class=kicker data-i18n=kickStock>ON SHELF</div>
+    <div class=chips>
+      <div class=chipset id=listChips></div>
+      <input id=listQ type=search autocomplete=off data-i18n-ph=phList>
+    </div>
+    <div class=list id=listingBoard></div>
+  </section>
+
+  <section id=viewServers class="panel hidden">
+    <div class=kicker data-i18n=kickServers>JOINED SERVERS</div>
+    <div class=list id=serverList></div>
+  </section>
+
+  <section id=viewTrades class="panel hidden">
+    <div class=kicker data-i18n=kickTrades>RECENT TRADES</div>
+    <div class=chips>
+      <div class=chipset id=tradeChips></div>
+      <input id=tradeQ type=search autocomplete=off data-i18n-ph=phTrade>
+    </div>
+    <div class=list id=tradeList></div>
+  </section>
+
+  <section id=viewConfig class="panel hidden">
+    <div class=kicker data-i18n=kickConfig>FX CONFIG</div>
+    <form id=fxForm>
+      <div class=formgrid>
+        <div><label data-i18n=labWindow>WINDOW HOURS</label><input id=fxWindow type=number min=1 max=168 step=1></div>
+        <div><label data-i18n=labK>K</label><input id=fxK type=number min=0 max=2 step=0.01></div>
+        <div><label data-i18n=labScale>SCALE</label><input id=fxScale type=number min=1 step=1></div>
+        <div><label data-i18n=labMin>RATE MIN</label><input id=fxMin type=number min=0.01 max=100 step=0.01></div>
+        <div><label data-i18n=labMax>RATE MAX</label><input id=fxMax type=number min=0.01 max=1000 step=0.01></div>
+      </div>
+      <button class=block type=submit data-i18n=btnSave>SAVE FX</button>
+    </form>
+    <div class=hint data-i18n=hintFormula>rate = 基准 × (1 + K × tanh(净出口互通额 / SCALE))，再夹到 MIN–MAX。净出口 = 外服买走本服货 − 本服买外服货。</div>
+    <button type=button class=danger id=btnLogout data-i18n=btnForget>FORGET TOKEN</button>
+  </section>
+
+  <footer class=foot>
+    <span>ETHERSYNC MARKET</span>
+    <span id=footMeta></span>
+  </footer>
+</div>
+<div id=toast></div>
+<script>
+const $=s=>document.querySelector(s);
+const KEY='eslink-market-token';
+const LANG_KEY='eslink-market-lang';
+const I18N={
+  zh:{
+    navDash:'总览',navRates:'汇率',navList:'货单',navServers:'服务器',navTrades:'成交',navConfig:'设置',
+    kickLogin:'接入令牌',kickLive:'实时状态',kickFx:'汇率窗口',kickRecent:'最近成交',
+    kickChart:'汇率走势',kickStock:'在架',kickFlow:'服间货流',
+    kickRates:'各服汇率',kickServers:'已接入服务器',kickTrades:'成交记录',kickConfig:'汇率参数',
+    allSrv:'全部',noneList:'暂无在架',noneFlow:'窗口内没有跨服成交',noneChart:'还没有汇率点',
+    exp:'出口',imp:'进口',
+    phList:'搜物品 / 卖家',phTrade:'搜玩家 / 物品 / 服',
+    tagBuy:'买',tagPickup:'取',kindAll:'全部',kindBuy:'成交',kindPickup:'自取',
+    pickup:'{who} 取回了 {item} ×{amt}',
+    labToken:'令牌',labWindow:'窗口（小时）',labK:'K',labScale:'SCALE',labMin:'汇率下限',labMax:'汇率上限',
+    btnEnter:'进入',btnSave:'保存参数',btnForget:'清除令牌',
+    hintFx:'成交会推高卖方服务器汇率。买得多的服汇率回落。下架和自己取回不计入。',
+    hintRates:'自动：按近窗成交调节，基准是切入自动时的汇率。手动：钉死；游戏里点 ± 也会变成手动。',
+    hintFormula:'汇率 = 基准 × (1 + K × tanh(净出口互通额 / SCALE))，再夹到上下限。净出口 = 外服买走本服货 − 本服买外服货。',
+    loginHint:'货栈「{name}」· 货单 {listings} · 服务器 {servers}。令牌在启动终端或 data/market.json。',
+    loginHintEmpty:'浏览器只用来看货栈。令牌跟插件 markets.list.*.token 相同。',
+    kName:'名称',kVer:'版本',kList:'在架',kSrv:'服务器',kTrades:'24小时成交',kVol:'24小时额',
+    kWin:'窗口',kClamp:'夹取',
+    online:'在线',offline:'离线',auto:'自动',manual:'手动',
+    base:'基准',net:'净出口',link:'互通',noneRate:'还没有服务器心跳。',noneTrade:'暂无成交',noneSrv:'无',
+    someone:'某人',remote:'外服',item:'物品',desk:'货栈',
+    trade:'{who} 从 {src} 买了 {item} ×{amt}',
+    toastBad:'令牌无效',toastSaved:'已保存',toastFail:'失败',toastGone:'已清除',
+    toastRate:'汇率要大于 0',btnSet:'写入',
+    live:'在线台',deskOff:'未接入',foot:'中文',
+    rail:'在架 {listings} · 服务器 {servers} · 24小时 {trades} 笔 / {vol}',
+    tapeTag:'播报',tapeIdle:'货栈待机 · 等待接入'
+  },
+  en:{
+    navDash:'OVERVIEW',navRates:'RATES',navList:'LISTINGS',navServers:'SERVERS',navTrades:'TRADES',navConfig:'CONFIG',
+    kickLogin:'JOIN TOKEN',kickLive:'LIVE STATUS',kickFx:'FX WINDOW',kickRecent:'RECENT',
+    kickChart:'RATE PATH',kickStock:'ON SHELF',kickFlow:'SERVER FLOW',
+    kickRates:'PER SERVER RATE',kickServers:'JOINED SERVERS',kickTrades:'RECENT TRADES',kickConfig:'FX CONFIG',
+    allSrv:'ALL',noneList:'Nothing on the shelf',noneFlow:'No cross-server buys in the window',noneChart:'No rate points yet',
+    exp:'export',imp:'import',
+    phList:'item / seller',phTrade:'player / item / server',
+    tagBuy:'BUY',tagPickup:'PICKUP',kindAll:'ALL',kindBuy:'SALES',kindPickup:'PICKUP',
+    pickup:'{who} picked up {item} ×{amt}',
+    labToken:'TOKEN',labWindow:'WINDOW HOURS',labK:'K',labScale:'SCALE',labMin:'RATE MIN',labMax:'RATE MAX',
+    btnEnter:'ENTER',btnSave:'SAVE FX',btnForget:'FORGET TOKEN',
+    hintFx:'Sales lift the seller server rate. Heavy importers drift down. Unlist and self-pickup do not count.',
+    hintRates:'AUTO follows the trade window from the rate when you switched on. MANUAL pins it; in-game ± also pins.',
+    hintFormula:'rate = base × (1 + K × tanh(net export / SCALE)), then clamp. Net export = sold to others − bought from others.',
+    loginHint:'Market "{name}" · {listings} listings · {servers} servers. Token is in the terminal or data/market.json.',
+    loginHintEmpty:'This page is for the market desk. Use the same token as markets.list.*.token.',
+    kName:'NAME',kVer:'VERSION',kList:'LISTINGS',kSrv:'SERVERS',kTrades:'TRADES 24H',kVol:'VOLUME 24H',
+    kWin:'WINDOW',kClamp:'CLAMP',
+    online:'ON',offline:'OFF',auto:'AUTO',manual:'MANUAL',
+    base:'base',net:'net export',link:'link',noneRate:'No server heartbeat yet.',noneTrade:'No trades yet',noneSrv:'None',
+    someone:'someone',remote:'remote',item:'item',desk:'MARKET',
+    trade:'{who} bought {item} ×{amt} from {src}',
+    toastBad:'Bad token',toastSaved:'Saved',toastFail:'Failed',toastGone:'Token cleared',
+    toastRate:'Rate must be > 0',btnSet:'SET',
+    live:'DESK LIVE',deskOff:'STANDBY',foot:'English',
+    rail:'{listings} listings · {servers} servers · 24h {trades} / {vol}',
+    tapeTag:'TAPE',tapeIdle:'MARKET STANDBY · AWAITING TOKEN'
+  }
+};
+let view='dash', data=null, fxDirty=false, publicInfo=null, listFilter='', tradeKind='';
+const FX_COLORS=['#0A2A8C','#1F7A86','#071C5C','#c7383d','#5A6068'];
+let lang=localStorage.getItem(LANG_KEY)||((navigator.language||'').toLowerCase().startsWith('zh')?'zh':'en');
+function t(k){return (I18N[lang]||I18N.zh)[k]||k}
+function fmt(k, vars){return t(k).replace(/\{(\w+)\}/g,(_,n)=>vars[n]??'')}
+function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function toast(m){const el=$('#toast');el.textContent=m;el.style.display='block';clearTimeout(el._t);el._t=setTimeout(()=>el.style.display='none',2400)}
+function token(){return sessionStorage.getItem(KEY)||''}
+function setToken(v){if(v)sessionStorage.setItem(KEY,v);else sessionStorage.removeItem(KEY)}
+function headers(){const h={'Accept':'application/json'};if(token())h.Authorization='Bearer '+token();return h}
+function rateText(r){const n=Number(r)||1;const s=Math.abs(n-Math.round(n))<0.0001?String(Math.round(n)):n.toFixed(2);return '1:'+s}
+function tickClock(){
+  const now=new Date();
+  $('#clock').textContent=now.toLocaleTimeString(lang==='zh'?'zh-CN':'en',{hour:'2-digit',minute:'2-digit',hour12:false});
+}
+function applyI18n(){
+  document.documentElement.lang=lang==='zh'?'zh-CN':'en';
+  document.querySelectorAll('[data-i18n]').forEach(el=>{el.textContent=t(el.dataset.i18n)});
+  document.querySelectorAll('[data-i18n-ph]').forEach(el=>{el.placeholder=t(el.dataset.i18nPh)});
+  $('#btnZh').classList.toggle('on',lang==='zh');
+  $('#btnEn').classList.toggle('on',lang==='en');
+  tickClock();
+  paintLoginHint();
+  if(data){
+    paintRail(data);
+    paintTape(data);
+  }else{
+    $('#footMeta').textContent=t('foot');
+    if(!publicInfo||!publicInfo.name) $('#title').textContent=t('desk');
+  }
+}
+function setLang(next){
+  lang=next;localStorage.setItem(LANG_KEY,next);
+  applyI18n();
+  if(data) render(data);
+}
+function setView(v){
+  view=v;
+  ['dash','rates','list','servers','trades','config'].forEach(id=>{
+    $('#view'+id[0].toUpperCase()+id.slice(1)).classList.toggle('hidden',v!==id);
+    $('#btn'+id[0].toUpperCase()+id.slice(1)).classList.toggle('on',v===id);
+  });
+}
+function loggedIn(on){
+  $('#viewLogin').classList.toggle('hidden',on);
+  $('#nav').classList.toggle('hidden',!on);
+  $('#rail').classList.toggle('hidden',!on);
+  if(!on){
+    ['viewDash','viewRates','viewList','viewServers','viewTrades','viewConfig'].forEach(id=>$('#'+id).classList.add('hidden'));
+    return;
+  }
+  setView(view);
+}
+function ratesBusy(){
+  const a=document.activeElement;
+  return view==='rates' && a && a.matches && a.matches('input[data-set]');
+}
+function tradeRow(row){
+  const buyer=esc(row.buyer_name||t('someone'));
+  const buyerSrv=esc(row.buyer_server||'');
+  const seller=esc(row.seller_name||'');
+  const sellerSrv=esc(row.seller_server||t('remote'));
+  const item=esc(row.item_name||t('item'));
+  const amt=esc(row.amount||0);
+  const when=row.ts?new Date(row.ts).toLocaleString(lang==='zh'?'zh-CN':'en'):'';
+  const who=buyerSrv?`${buyer}（${buyerSrv}）`:buyer;
+  const src=seller
+    ? (lang==='zh'?`${sellerSrv} 的 ${seller}`:`${seller} on ${sellerSrv}`)
+    : sellerSrv;
+  const pickup=row.kind==='pickup';
+  const line=pickup?fmt('pickup',{who,item,amt}):fmt('trade',{who,src,item,amt});
+  const tag=pickup?`<span class="badge mute">${t('tagPickup')}</span>`:`<span class=badge>${t('tagBuy')}</span>`;
+  return `<div class=item><span class=who>${line}${tag}</span><span class=meta>${esc(row.price)} ${t('link')} · ${esc(when)}</span></div>`
+}
+function tradeLine(row){
+  const buyer=row.buyer_name||t('someone');
+  const buyerSrv=row.buyer_server||'';
+  const seller=row.seller_name||'';
+  const sellerSrv=row.seller_server||t('remote');
+  const item=row.item_name||t('item');
+  const amt=row.amount||0;
+  const who=buyerSrv?`${buyer}（${buyerSrv}）`:buyer;
+  const src=seller
+    ? (lang==='zh'?`${sellerSrv} 的 ${seller}`:`${seller} on ${sellerSrv}`)
+    : sellerSrv;
+  return row.kind==='pickup'?fmt('pickup',{who,item,amt}):fmt('trade',{who,src,item,amt});
+}
+function listingRow(row){
+  const item=esc(row.item_name||t('item'));
+  const amt=esc(row.amount||0);
+  const who=esc(row.seller_name||t('someone'));
+  const srv=esc(row.server_code||t('remote'));
+  return `<div class=item><span class=who>${item} ×${amt}</span><span class=meta>${who} · ${srv} · ${esc(row.price)} ${t('link')}</span></div>`
+}
+function sparkSvg(series, w, h, legend){
+  const rows=(series||[]).filter(s=>s&&s.points&&s.points.length);
+  if(!rows.length) return `<div class=hint style=margin:0>${t('noneChart')}</div>`;
+  const all=rows.flatMap(s=>s.points.map(p=>Number(p.rate)||0));
+  let lo=Math.min(...all), hi=Math.max(...all);
+  if(hi===lo){lo=Math.max(0,lo-0.15);hi=hi+0.15}
+  const span=hi-lo||1;
+  const paths=rows.map((s,i)=>{
+    const pts=s.points;
+    const d=pts.map((p,j)=>{
+      const x=(pts.length===1?0:j/(pts.length-1))*w;
+      const y=h-((Number(p.rate)||0)-lo)/span*h;
+      return (j?'L':'M')+x.toFixed(1)+','+y.toFixed(1);
+    }).join(' ');
+    return `<path d="${d}" fill=none stroke="${FX_COLORS[i%FX_COLORS.length]}" stroke-width="1.6"/>`;
+  }).join('');
+  const keys=legend===false?'':`<div class=legend>${rows.map((s,i)=>`<span><i style=background:${FX_COLORS[i%FX_COLORS.length]}></i>${esc(s.code)}</span>`).join('')}</div>`;
+  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden=true>${paths}</svg>${keys}`;
+}
+function flowBlock(rows){
+  const list=rows||[];
+  if(!list.length) return `<div class=item>${t('noneFlow')}</div>`;
+  const max=Math.max(...list.map(r=>Number(r.vol)||0),1);
+  return list.slice(0,8).map(r=>{
+    const pct=Math.min(100,(Number(r.vol)||0)/max*100);
+    return `<div class=flow><span class=who>${esc(r.from)} → ${esc(r.to)}</span><div class=bar><i style=width:${pct.toFixed(1)}%></i></div><span class=meta>${esc(r.vol)} ${t('link')}</span></div>`;
+  }).join('');
+}
+function paintListings(d){
+  const all=d.listings||[];
+  const codes=[...new Set(all.map(r=>r.server_code).filter(Boolean))];
+  const chips=[{code:'',label:t('allSrv')}].concat(codes.map(c=>({code:c,label:c})));
+  $('#listChips').innerHTML=chips.map(c=>`<button type=button class="ghost ${listFilter===c.code?'primary':''}" data-srv="${esc(c.code)}">${esc(c.label)}</button>`).join('');
+  const q=($('#listQ').value||'').trim().toLowerCase();
+  let rows=listFilter?all.filter(r=>r.server_code===listFilter):all.slice();
+  if(q) rows=rows.filter(r=>[r.item_name,r.item_key,r.seller_name,r.server_code].join(' ').toLowerCase().includes(q));
+  const empty=`<div class=item>${t('noneList')}</div>`;
+  $('#listingBoard').innerHTML=rows.map(listingRow).join('')||empty;
+  $('#dashListings').innerHTML=all.slice(0,6).map(listingRow).join('')||empty;
+}
+function paintTrades(d){
+  const all=d.trades||[];
+  const chips=[{id:'',label:t('kindAll')},{id:'buy',label:t('kindBuy')},{id:'pickup',label:t('kindPickup')}];
+  $('#tradeChips').innerHTML=chips.map(c=>`<button type=button class="ghost ${tradeKind===c.id?'primary':''}" data-kind="${esc(c.id)}">${esc(c.label)}</button>`).join('');
+  const q=($('#tradeQ').value||'').trim().toLowerCase();
+  let rows=tradeKind?all.filter(r=>r.kind===tradeKind):all.slice();
+  if(q) rows=rows.filter(r=>[r.buyer_name,r.seller_name,r.item_name,r.buyer_server,r.seller_server].join(' ').toLowerCase().includes(q));
+  const empty=`<div class=item>${t('noneTrade')}</div>`;
+  $('#tradeList').innerHTML=rows.map(tradeRow).join('')||empty;
+  $('#dashTrades').innerHTML=all.slice(0,6).map(tradeRow).join('')||empty;
+}
+function paintRail(d){
+  const info=(d&&d.info)||{};
+  const online=(d.servers||[]).some(s=>s.online);
+  $('#railDot').classList.toggle('off',!online);
+  $('#railLive').textContent=online?t('live'):t('deskOff');
+  $('#railMeta').textContent=fmt('rail',{
+    listings:info.listings??'--',servers:info.servers??'--',
+    trades:info.trades_24h??'--',vol:info.volume_24h??'--'
+  });
+  $('#footMeta').textContent=(d.version?d.version+' · ':'')+t('foot');
+}
+function tapeBits(d){
+  if(!d) return [t('tapeIdle')];
+  const bits=[];
+  const info=d.info||{};
+  if(d.name||info.listings!=null){
+    bits.push([d.name||t('desk'), t('kList')+' '+(info.listings??'--'), t('kSrv')+' '+(info.servers??'--'), t('kTrades')+' '+(info.trades_24h??'--'), t('kVol')+' '+(info.volume_24h??'--')].join(' · '));
+  }
+  (d.servers||[]).forEach(s=>{
+    bits.push(`${s.code} ${rateText(s.link_rate)} ${s.mode==='manual'?t('manual'):t('auto')} ${s.online?t('online'):t('offline')}`);
+  });
+  (d.flow||[]).slice(0,6).forEach(f=>{
+    bits.push(`${f.from} → ${f.to}  ${f.vol} ${t('link')}`);
+  });
+  (d.trades||[]).slice(0,8).forEach(row=>bits.push(tradeLine(row)));
+  return bits.length?bits:[t('tapeIdle')];
+}
+function paintTape(d){
+  const bits=tapeBits(d);
+  const key=lang+'|'+bits.join('\n');
+  if(key===window.__tapeKey) return;
+  window.__tapeKey=key;
+  const html=bits.map(s=>`<span>${esc(s)}</span>`).join('');
+  $('#tapeTrack').innerHTML=html+html;
+  const n=bits.join('').length;
+  $('#tapeTrack').style.animationDuration=Math.max(22, Math.min(90, n*0.28))+'s';
+}
+function render(d){
+  data=d;
+  $('#title').textContent=d.name||t('desk');
+  paintRail(d);
+  paintTape(d);
+  const info=d.info||{};
+  const fx=d.fx||{};
+  $('#dashCards').innerHTML=[
+    [t('kName'),d.name||'--'],[t('kVer'),d.version||'--'],
+    [t('kList'),info.listings??'--'],[t('kSrv'),info.servers??'--'],
+    [t('kTrades'),info.trades_24h??'--'],[t('kVol'),info.volume_24h??'--']
+  ].map(([k,v])=>`<div class=stat><div class=k>${esc(k)}</div><div class=v>${esc(v)}</div></div>`).join('');
+  $('#fxCards').innerHTML=[
+    [t('kWin'),(fx.window_hours??'--')+' h'],['K',fx.k??'--'],
+    ['SCALE',fx.scale??'--'],[t('kClamp'),(fx.min??'--')+' – '+(fx.max??'--')]
+  ].map(([k,v])=>`<div class=stat><div class=k>${esc(k)}</div><div class=v>${esc(v)}</div></div>`).join('');
+  const series=d.fx_series||[];
+  $('#fxChart').innerHTML=sparkSvg(series, 640, 148, true);
+  const servers=d.servers||[];
+  if(!ratesBusy()){
+    $('#rateList').innerHTML=servers.map(s=>{
+      const net=Number(s.net||0);
+      const exp=Math.abs(Number(s.export||0));
+      const imp=Math.abs(Number(s.import||0));
+      const vol=Math.max(1,exp+imp);
+      const pct=Math.min(100,Math.abs(net)/vol*100);
+      const on=s.online?'on':'';
+      const mode=s.mode==='manual'?t('manual'):t('auto');
+      const one=series.find(x=>x.code===s.code);
+      const mini=one?`<div class="chart mini">${sparkSvg([one], 280, 36, false)}</div>`:'';
+      return `<div class="card rate">
+        <div class=k><i class="dot ${on}"></i>${esc(s.code)} · ${esc(mode)} · ${s.online?t('online'):t('offline')}<span class=badge>${esc(s.name||'')}</span></div>
+        <div class=v>${rateText(s.link_rate)}</div>
+        ${mini}
+        <div class=hint style=margin:8px 0 0>${t('base')} ${rateText(s.rate_base)} · ${t('net')} ${net>=0?'+':''}${esc(net)} ${t('link')}</div>
+        <div class=bar><i style=width:${pct}%;background:${net<0?'var(--warn)':'var(--jiqing)'}></i></div>
+        <div class=actions>
+          <button type=button class="ghost ${s.mode==='auto'?'primary':''}" data-auto="${esc(s.code)}">${t('auto')}</button>
+          <button type=button class="ghost ${s.mode==='manual'?'primary':''}" data-man="${esc(s.code)}">${t('manual')}</button>
+          <input data-set="${esc(s.code)}" placeholder="1.20">
+          <button type=button class=ghost data-apply="${esc(s.code)}">${t('btnSet')}</button>
+        </div>
+      </div>`}).join('')||`<div class=hint>${t('noneRate')}</div>`;
+  }
+  $('#serverList').innerHTML=servers.map(s=>{
+    const exp=Math.abs(Number(s.export||0));
+    const imp=Math.abs(Number(s.import||0));
+    const net=Number(s.net||0);
+    const tot=Math.max(1,exp+imp);
+    return `<div class=item><span class=who><i class="dot ${s.online?'on':''}"></i>${esc(s.code)} · ${esc(s.name||'')} · ${s.online?t('online'):t('offline')}
+      <div class=twin><b style=width:${(exp/tot*100).toFixed(1)}%></b><em style=width:${(imp/tot*100).toFixed(1)}%></em></div>
+      <div class=hint style=margin:6px 0 0>${t('exp')} ${esc(exp)} · ${t('imp')} ${esc(imp)}</div></span>
+      <span class=meta>${rateText(s.link_rate)} · ${t('net')} ${net>=0?'+':''}${esc(net)} · ${esc(s.mode==='manual'?t('manual'):t('auto'))}</span></div>`;
+  }).join('')||`<div class=item>${t('noneSrv')}</div>`;
+  paintTrades(d);
+  paintListings(d);
+  $('#flowList').innerHTML=flowBlock(d.flow);
+  if(!fxDirty){
+    if(fx.window_hours!=null) $('#fxWindow').value=fx.window_hours;
+    if(fx.k!=null) $('#fxK').value=fx.k;
+    if(fx.scale!=null) $('#fxScale').value=fx.scale;
+    if(fx.min!=null) $('#fxMin').value=fx.min;
+    if(fx.max!=null) $('#fxMax').value=fx.max;
+  }
+}
+function paintLoginHint(){
+  const d=publicInfo||{};
+  if(d.name||d.listings!=null){
+    $('#loginHint').textContent=fmt('loginHint',{name:d.name||'',listings:d.listings??'--',servers:d.servers??'--'});
+    if(d.name) $('#title').textContent=d.name;
+  }else $('#loginHint').textContent=t('loginHintEmpty');
+  if(!data) paintTape(d.name||d.listings!=null?{name:d.name,info:d}:null);
+}
+function pull(){
+  if(!token()){loggedIn(false);return}
+  fetch('/v1/dashboard',{headers:headers()}).then(r=>{
+    if(r.status===401){setToken('');loggedIn(false);toast(t('toastBad'));throw new Error('auth')}
+    return r.json();
+  }).then(d=>{loggedIn(true);render(d);if(!window.__viewLocked){setView('dash');window.__viewLocked=true}}).catch(e=>{
+    if(e&&e.message==='auth') return;
+  });
+}
+function postFx(body){
+  return fetch('/v1/fx',{method:'POST',headers:{...headers(),'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json()).then(d=>{
+    if(d&&d.ok===false) throw new Error(d.error||t('toastFail'));
+    toast(t('toastSaved'));pull();
+  }).catch(e=>toast(e.message||t('toastFail')));
+}
+function applyRate(code, raw){
+  const n=Number(raw); if(!(n>0)) {toast(t('toastRate'));return}
+  postFx({code,mode:'manual',rate:n});
+}
+$('#loginForm').onsubmit=e=>{
+  e.preventDefault();
+  setToken($('#tokenInput').value.trim());
+  window.__viewLocked=false;pull();
+};
+$('#btnLogout').onclick=()=>{setToken('');loggedIn(false);toast(t('toastGone'))};
+$('#nav').addEventListener('click',e=>{
+  const b=e.target.closest('button[data-view]'); if(!b) return;
+  window.__viewLocked=true; setView(b.dataset.view);
+});
+$('#langBar').addEventListener('click',e=>{
+  const b=e.target.closest('[data-lang]'); if(!b) return;
+  setLang(b.dataset.lang);
+});
+$('#listChips').addEventListener('click',e=>{
+  const b=e.target.closest('[data-srv]'); if(!b||!data) return;
+  listFilter=b.dataset.srv||'';
+  paintListings(data);
+});
+$('#listQ').addEventListener('input',()=>{if(data) paintListings(data)});
+$('#tradeChips').addEventListener('click',e=>{
+  const b=e.target.closest('[data-kind]'); if(!b||!data) return;
+  tradeKind=b.dataset.kind||'';
+  paintTrades(data);
+});
+$('#tradeQ').addEventListener('input',()=>{if(data) paintTrades(data)});
+$('#viewRates').addEventListener('click',e=>{
+  const a=e.target.closest('[data-auto]');
+  if(a){postFx({code:a.dataset.auto,mode:'auto'});return}
+  const m=e.target.closest('[data-man]');
+  if(m){postFx({code:m.dataset.man,mode:'manual'});return}
+  const ap=e.target.closest('[data-apply]');
+  if(ap){
+    const card=ap.closest('.card');
+    const inp=card&&card.querySelector('input[data-set]');
+    applyRate(ap.dataset.apply, inp?inp.value:'');
+  }
+});
+$('#viewRates').addEventListener('keydown',e=>{
+  if(e.key!=='Enter') return;
+  const inp=e.target.closest('input[data-set]'); if(!inp) return;
+  applyRate(inp.dataset.set, inp.value);
+});
+$('#fxForm').addEventListener('input',()=>{fxDirty=true});
+$('#fxForm').onsubmit=e=>{
+  e.preventDefault();
+  fxDirty=false;
+  postFx({fx:{
+    window_hours:Number($('#fxWindow').value),
+    k:Number($('#fxK').value),
+    scale:Number($('#fxScale').value),
+    min:Number($('#fxMin').value),
+    max:Number($('#fxMax').value)
+  }});
+};
+(function boot(){
+  const q=new URLSearchParams(location.search).get('token');
+  if(q){setToken(q);history.replaceState({},'',location.pathname)}
+  applyI18n();
+  tickClock();setInterval(tickClock,15000);
+  fetch('/v1/info').then(r=>r.json()).then(d=>{publicInfo=d;paintLoginHint()}).catch(()=>{});
+  loggedIn(!!token());
+  pull();setInterval(pull,4000);
+})();
+</script></body></html>

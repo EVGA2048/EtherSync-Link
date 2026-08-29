@@ -111,7 +111,11 @@ public final class ChestNet {
     }
 
     public void paint() {
-        for (Models.ChestRow c : cached) refreshSign(c);
+        for (Models.ChestRow c : cached) {
+            Block b = block(c);
+            if (b == null) continue;
+            refreshSign(c);
+        }
     }
 
     private void rememberSignFace(Models.ChestRow c, BlockFace face) {
@@ -1224,6 +1228,7 @@ public final class ChestNet {
     private Block block(Models.ChestRow c) {
         World w = Bukkit.getWorld(c.world());
         if (w == null) return null;
+        if (!w.isChunkLoaded(c.x() >> 4, c.z() >> 4)) return null;
         return w.getBlockAt(c.x(), c.y(), c.z());
     }
 }

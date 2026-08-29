@@ -139,6 +139,10 @@ public final class MarketNet {
     }
 
     public void heartbeatAll() {
+        heartbeatAll(false, null);
+    }
+
+    public void heartbeatAll(boolean pinRate, String rateMode) {
         String code = plugin.serverCode();
         String name = plugin.serverName();
         String blurb = plugin.serverBlurb();
@@ -147,7 +151,11 @@ public final class MarketNet {
         double rate = plugin.linkRate();
         for (MarketClient c : clients.values()) {
             try {
-                c.heartbeat(code, name, blurb, color, icon, rate);
+                com.google.gson.JsonObject o = c.heartbeat(code, name, blurb, color, icon, rate, pinRate, rateMode);
+                double link = o != null && o.has("link_rate") && !o.get("link_rate").isJsonNull()
+                        ? o.get("link_rate").getAsDouble() : -1;
+                String mode = o != null && o.has("rate_mode") ? o.get("rate_mode").getAsString() : "";
+                plugin.onMarketRate(link, mode);
             } catch (Exception e) {
                 c.markFail(e.getMessage());
             }
@@ -210,8 +218,14 @@ public final class MarketNet {
     }
 
     public Models.Listing claim(Player p, long id) throws Exception {
+        return claim(p, id, false);
+    }
+
+    public Models.Listing claim(Player p, long id, boolean pickup) throws Exception {
         MarketClient c = clientOf(p);
-        if (c != null) return c.claim(id);
+        if (c != null) {
+            return c.claim(id, p.getUniqueId(), p.getName(), plugin.serverCode(), pickup);
+        }
         Models.Listing row = plugin.store().listing(id);
         if (row == null) return null;
         return plugin.store().deleteListing(id) ? row : null;

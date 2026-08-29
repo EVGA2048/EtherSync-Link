@@ -616,8 +616,10 @@ public final class ChestListener implements Listener {
 
     private static Sign findSignOn(Block chest) {
         if (chest == null) return null;
+        if (!chest.getWorld().isChunkLoaded(chest.getX() >> 4, chest.getZ() >> 4)) return null;
         for (BlockFace f : AROUND) {
             Block n = chest.getRelative(f);
+            if (!n.getWorld().isChunkLoaded(n.getX() >> 4, n.getZ() >> 4)) continue;
             if (n.getState() instanceof Sign sign) return sign;
         }
         return null;

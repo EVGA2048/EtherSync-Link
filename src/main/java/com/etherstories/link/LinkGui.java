@@ -825,7 +825,7 @@ public final class LinkGui {
                 async(() -> {
                     Models.Listing claimed;
                     try {
-                        claimed = plugin.markets().claim(p, row.id());
+                        claimed = plugin.markets().claim(p, row.id(), selfRemote);
                         if (claimed == null) {
                             sync(() -> {
                                 if (pay > 0 && plugin.vault().ok()) plugin.vault().deposit(p, pay);
@@ -1162,7 +1162,7 @@ public final class LinkGui {
                 async(() -> {
                     Models.Listing claimed;
                     try {
-                        claimed = plugin.markets().claim(p, row.id());
+                        claimed = plugin.markets().claim(p, row.id(), true);
                         if (claimed == null) {
                             sync(() -> {
                                 if (pay > 0 && plugin.vault().ok()) plugin.vault().deposit(p, pay);
@@ -1948,14 +1948,22 @@ public final class LinkGui {
         inv.setItem(17, tag("tax-up", "", 0, Items.named(Material.LIME_CONCRETE, "&a税率 +1%",
                 List.of("&7当前 &f" + plugin.taxRateText()))));
         inv.setItem(21, tag("rate-down", "", 0, Items.named(Material.RED_CONCRETE, "&c汇率 -0.1",
-                List.of("&7当前 &f" + plugin.linkRateText(), "&8潜行点击 ±0.01"))));
-        inv.setItem(22, Items.named(Material.SUNFLOWER, "&e互通汇率 &f" + plugin.linkRateText(),
+                List.of("&7当前 &f" + plugin.linkRateText(), "&8潜行点击 ±0.01", "&8点击后改为本服手动"))));
+        String rateMode = plugin.marketRateMode();
+        boolean auto = plugin.marketRateAuto();
+        String modeLine = switch (rateMode) {
+            case "auto" -> "&a货栈自动调节";
+            case "manual" -> "&e本服手动钉死";
+            default -> "&7未接货栈，本服配置";
+        };
+        inv.setItem(22, tag("rate-mode", "", 0, Items.named(Material.SUNFLOWER, "&e互通汇率 &f" + plugin.linkRateText(),
                 List.of("&7含义：1 本服货币 = " + ESLinkPlugin.stripZeros(plugin.linkRate()) + " 互通",
+                        modeLine,
                         "&7上架输入本服价格，货单按互通记账",
-                        "&7外服玩家看到的是他们本服换算后的实付（含税）",
-                        "&8例：1:1.5 表示本服 10 = 互通 15")));
+                        auto ? "&8点击改为手动钉死" : "&8点击跟随货栈自动调节",
+                        "&8例：1:1.5 表示本服 10 = 互通 15"))));
         inv.setItem(23, tag("rate-up", "", 0, Items.named(Material.LIME_CONCRETE, "&a汇率 +0.1",
-                List.of("&7当前 &f" + plugin.linkRateText(), "&8潜行点击 ±0.01"))));
+                List.of("&7当前 &f" + plugin.linkRateText(), "&8潜行点击 ±0.01", "&8点击后改为本服手动"))));
         inv.setItem(24, tag("claim-tog", "", 0, Items.named(
                 plugin.claimCodeEnabled() ? Material.LIME_CONCRETE : Material.RED_CONCRETE,
                 plugin.claimCodeEnabled() ? "&a取件码: 开" : "&c取件码: 关",
