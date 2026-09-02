@@ -5,7 +5,7 @@ import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.util.UUID;
 
-/** 离线服 UUID 可被冒名。跨服取回 / 钱包取出用 6 位码，只在生成时告诉本人。 */
+/** 离线服 UUID 可被冒名。跨服取回与钱包取出使用6 位码。钱包码可在本服钱包页再看、自行修改。 */
 final class ClaimCodes {
     private static final SecureRandom RNG = new SecureRandom();
 

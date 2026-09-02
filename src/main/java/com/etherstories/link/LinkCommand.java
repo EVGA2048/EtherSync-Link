@@ -52,7 +52,7 @@ public final class LinkCommand implements TabExecutor {
                     String who = t.getName() == null ? args[1] : t.getName();
                     org.bukkit.Bukkit.getScheduler().runTask(plugin, () ->
                             sender.sendMessage(ColorUtil.colorize("&bESLink &7» &f已清除 "
-                                    + who + " 的钱包码。下次存入会生成新码。")));
+                                    + who + " 的钱包码。下次存入会生成新码，也可以在钱包页自行设置。")));
                 } catch (Exception e) {
                     org.bukkit.Bukkit.getScheduler().runTask(plugin, () ->
                             sender.sendMessage(ColorUtil.colorize("&c清除失败")));

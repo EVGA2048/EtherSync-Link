@@ -231,6 +231,7 @@ public final class Store {
                 }
             }
             try { s.executeUpdate("ALTER TABLE link_wallets ADD COLUMN claim_hash CHAR(64) NOT NULL DEFAULT ''"); } catch (Exception ignored) {}
+            try { s.executeUpdate("ALTER TABLE link_wallets ADD COLUMN claim_code CHAR(6) NULL"); } catch (Exception ignored) {}
             s.executeUpdate("""
                     CREATE TABLE IF NOT EXISTS link_seen (
                       server_code VARCHAR(16) NOT NULL,
@@ -363,11 +364,52 @@ public final class Store {
         }
     }
 
+    public String walletClaimPlain(UUID uuid) throws Exception {
+        if (uuid == null) return null;
+        try (Connection c = ds.getConnection();
+             PreparedStatement ps = c.prepareStatement("SELECT claim_code FROM link_wallets WHERE uuid=?")) {
+            ps.setString(1, uuid.toString());
+            ResultSet rs = ps.executeQuery();
+            if (!rs.next()) return null;
+            String code = rs.getString(1);
+            return code == null || code.isBlank() ? null : ClaimCodes.normalize(code);
+        }
+    }
+
+    public void walletRememberCode(UUID uuid, String code) throws Exception {
+        if (uuid == null || !ClaimCodes.plausible(code)) return;
+        try (Connection c = ds.getConnection();
+             PreparedStatement ps = c.prepareStatement(
+                     "UPDATE link_wallets SET claim_code=? WHERE uuid=? AND (claim_code IS NULL OR claim_code='')")) {
+            ps.setString(1, ClaimCodes.normalize(code));
+            ps.setString(2, uuid.toString());
+            ps.executeUpdate();
+        }
+    }
+
+    public void walletSetClaim(UUID uuid, String code) throws Exception {
+        if (uuid == null || !ClaimCodes.plausible(code)) {
+            throw new IllegalArgumentException("钱包码需要 6 位数字");
+        }
+        String pin = ClaimCodes.normalize(code);
+        try (Connection c = ds.getConnection();
+             PreparedStatement ps = c.prepareStatement(
+                     "UPDATE link_wallets SET claim_hash=?, claim_code=?, updated=? WHERE uuid=?")) {
+            ps.setString(1, ClaimCodes.walletHash(uuid, pin));
+            ps.setString(2, pin);
+            ps.setLong(3, System.currentTimeMillis());
+            ps.setString(4, uuid.toString());
+            if (ps.executeUpdate() <= 0) {
+                throw new IllegalStateException("还没有钱包。请先存入一点金额。");
+            }
+        }
+    }
+
     public void walletClearClaim(UUID uuid) throws Exception {
         if (uuid == null) return;
         try (Connection c = ds.getConnection();
              PreparedStatement ps = c.prepareStatement(
-                     "UPDATE link_wallets SET claim_hash='', updated=? WHERE uuid=?")) {
+                     "UPDATE link_wallets SET claim_hash='', claim_code=NULL, updated=? WHERE uuid=?")) {
             ps.setLong(1, System.currentTimeMillis());
             ps.setString(2, uuid.toString());
             ps.executeUpdate();
@@ -402,14 +444,15 @@ public final class Store {
                         hash = ClaimCodes.walletHash(uuid, shown);
                     }
                     try (PreparedStatement ins = c.prepareStatement("""
-                            INSERT INTO link_wallets (uuid, name, balance, updated, claim_hash)
-                            VALUES (?,?,?,?,?)
+                            INSERT INTO link_wallets (uuid, name, balance, updated, claim_hash, claim_code)
+                            VALUES (?,?,?,?,?,?)
                             """)) {
                         ins.setString(1, uuid.toString());
                         ins.setString(2, nm);
                         ins.setDouble(3, add);
                         ins.setLong(4, now);
                         ins.setString(5, hash);
+                        ins.setString(6, shown);
                         ins.executeUpdate();
                     }
                 } else {
@@ -417,12 +460,13 @@ public final class Store {
                         shown = ClaimCodes.generate();
                         hash = ClaimCodes.walletHash(uuid, shown);
                         try (PreparedStatement upd = c.prepareStatement(
-                                "UPDATE link_wallets SET name=?, balance=balance+?, updated=?, claim_hash=? WHERE uuid=?")) {
+                                "UPDATE link_wallets SET name=?, balance=balance+?, updated=?, claim_hash=?, claim_code=? WHERE uuid=?")) {
                             upd.setString(1, nm);
                             upd.setDouble(2, add);
                             upd.setLong(3, now);
                             upd.setString(4, hash);
-                            upd.setString(5, uuid.toString());
+                            upd.setString(5, shown);
+                            upd.setString(6, uuid.toString());
                             upd.executeUpdate();
                         }
                     } else {

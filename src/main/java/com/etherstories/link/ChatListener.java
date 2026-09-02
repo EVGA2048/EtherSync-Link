@@ -18,7 +18,8 @@ public final class ChatListener implements Listener {
         Player p = e.getPlayer();
         Sessions.State st = plugin.sessions().of(p);
         if (!st.awaitingSearch && !st.awaitingPrice && !st.awaitingPair
-                && !st.awaitingWallet && !st.awaitingClaim && !st.awaitingWalletPin) return;
+                && !st.awaitingWallet && !st.awaitingClaim && !st.awaitingWalletPin
+                && !st.awaitingWalletNewPin) return;
         e.setCancelled(true);
         try { e.viewers().clear(); } catch (Throwable ignored) {}
         String msg = ChatTap.text(p, ItemChatPaper.plain(e)).trim();
@@ -61,10 +62,12 @@ public final class ChatListener implements Listener {
             st.awaitingSearch = false;
             st.awaitingPrice = false;
             st.awaitingPair = false;
-            boolean wallet = st.awaitingWallet || st.awaitingWalletPin;
+            boolean wallet = st.awaitingWallet || st.awaitingWalletPin || st.awaitingWalletNewPin;
             boolean claim = st.awaitingClaim;
             st.awaitingWallet = false;
             st.awaitingWalletPin = false;
+            st.awaitingWalletNewPin = false;
+            st.walletPinForChange = false;
             st.awaitingClaim = false;
             st.claimListingId = 0;
             st.repriceId = 0;
@@ -89,6 +92,10 @@ public final class ChatListener implements Listener {
         }
         if (st.awaitingWalletPin) {
             plugin.gui().finishWalletPin(p, msg);
+            return;
+        }
+        if (st.awaitingWalletNewPin) {
+            plugin.gui().finishWalletNewPin(p, msg);
             return;
         }
         if (st.awaitingClaim) {

@@ -278,6 +278,7 @@ public final class ChatBridge {
         String console = strip(line);
         for (Player p : Bukkit.getOnlinePlayers()) ChatMsg.tell(p, line);
         Bukkit.getConsoleSender().sendMessage(console);
+        LinkChatShowEvent.call(from.getName(), strip(body), line, "link");
     }
 
     public void send(Player p, String raw, ItemStack item) {
@@ -486,13 +487,15 @@ public final class ChatBridge {
             body = ItemChat.replacePlain(body, decoded, r.itemName());
         }
         String line = pfx + pname + ": " + body;
-        String console = strip(ColorUtil.colorize(line));
+        String display = ColorUtil.safe(line);
+        String console = strip(display);
         for (Player p : Bukkit.getOnlinePlayers()) {
             if (mutedServer(p, code) || mutedPlayer(p, pname)) continue;
             if (!receives(p, code)) continue;
             ChatMsg.tell(p, line);
         }
         Bukkit.getConsoleSender().sendMessage(console);
+        LinkChatShowEvent.call(pname, strip(body), display, "link");
     }
 
     private void deliverWhisper(Player dest, String fromCode, String fromName, String fromPlayer, String text) {

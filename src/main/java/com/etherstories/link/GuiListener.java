@@ -146,6 +146,8 @@ public final class GuiListener implements Listener {
             case "wallet-in" -> plugin.gui().beginWallet(p, false);
             case "wallet-out" -> plugin.gui().beginWallet(p, true);
             case "wallet-out-all" -> plugin.gui().walletOutAll(p);
+            case "wallet-pin-show" -> plugin.gui().showWalletPin(p);
+            case "wallet-pin-set" -> plugin.gui().beginWalletChangePin(p);
             case "claim" -> plugin.gui().beginClaimCode(p);
             case "claim-who" -> plugin.gui().pickClaimWho(p, Items.id(plugin, stack), Items.data(plugin, stack));
             case "buy-pickup" -> plugin.gui().beginClaimCode(p);

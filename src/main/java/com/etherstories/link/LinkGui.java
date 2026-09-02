@@ -971,6 +971,8 @@ public final class LinkGui {
         st.awaitingSearch = false;
         st.awaitingWallet = false;
         st.awaitingWalletPin = false;
+        st.awaitingWalletNewPin = false;
+        st.walletPinForChange = false;
         p.closeInventory();
         plugin.msg(p, "请输入 6 位取件码。别人发给你的也可以。cancel 取消。");
     }
@@ -1281,8 +1283,9 @@ public final class LinkGui {
                 mid.add("&7本服余额 &f" + plugin.money(plugin.vault().bal(p)));
                 mid.add("&8存入、取出都按本服汇率");
                 if (plugin.claimCodeEnabled()) {
-                    mid.add("&e取出需钱包码（首次存入时显示）");
-                    if (st.walletUnlocked) mid.add("&a本会话已验证钱包码");
+                    mid.add("&e取出时需要 6 位钱包码");
+                    mid.add("&7本页随时能再看，也可以自己修改");
+                    if (st.walletUnlocked) mid.add("&a这次登录已经核对过了");
                 }
                 mid.add("&8例：本服 10，汇率 1:1.5 → 互通 15");
                 inv.setItem(13, Items.named(Material.GOLD_INGOT, "&e互通余额 &f" + ESLinkPlugin.stripZeros(wallet), mid));
@@ -1297,11 +1300,19 @@ public final class LinkGui {
                                     "&8聊天栏输入本服金额，或输入 全部"))));
                     inv.setItem(15, tag("wallet-out", "", 0, Items.named(Material.YELLOW_CONCRETE, "&e取出",
                             List.of("&7按本服汇率把互通余额兑回本服",
-                                    plugin.claimCodeEnabled() ? "&e需首次存入时的 6 位钱包码" : "&8聊天栏输入要取的本服金额",
+                                    plugin.claimCodeEnabled() ? "&e需要 6 位钱包码" : "&8请在聊天栏输入要取出的本服金额",
                                     "&8或输入 全部 / 点击右侧全部取出"))));
                     inv.setItem(16, tag("wallet-out-all", "", 0, Items.named(Material.HOPPER, "&e全部取出",
                             List.of("&7兑回约 &a" + plugin.money(local),
                                     "&8按当前汇率一次性取出"))));
+                    if (plugin.claimCodeEnabled()) {
+                        inv.setItem(19, tag("wallet-pin-show", "", 0, Items.named(Material.NAME_TAG, "&e查看钱包码",
+                                List.of("&7再看一次现在的 6 位码",
+                                        "&8请自己留着，不要发给别人"))));
+                        inv.setItem(20, tag("wallet-pin-set", "", 0, Items.named(Material.ANVIL, "&e修改钱包码",
+                                List.of("&7改成更好记的 6 位数字",
+                                        "&8需要先核对现在的码"))));
+                    }
                 }
                 inv.setItem(22, tag("home", "", 0, Items.named(Material.OAK_DOOR, "&7返回大厅", null)));
                 openGui(p, inv, h.kind);
@@ -1330,7 +1341,7 @@ public final class LinkGui {
                 }
                 sync(() -> {
                     if (!has) {
-                        plugin.msg(p, "还没有钱包码。请先存入任意金额，聊天会显示 6 位钱包码，请记下后再取出。");
+                        plugin.msg(p, "还没有钱包码。请先存入一点金额，我们会在聊天里把6 位钱包码告诉你。之后随时可以回来查看，也可以自己修改。");
                         openWallet(p);
                         return;
                     }
@@ -1346,6 +1357,8 @@ public final class LinkGui {
         st.awaitingPair = false;
         st.awaitingClaim = false;
         st.awaitingWalletPin = false;
+        st.awaitingWalletNewPin = false;
+        st.walletPinForChange = false;
         p.closeInventory();
         if (out) {
             plugin.msg(p, "请输入要取出的本服金额。汇率 " + plugin.linkRateText()
@@ -1365,15 +1378,138 @@ public final class LinkGui {
         Sessions.State st = plugin.sessions().of(p);
         st.awaitingWalletPin = true;
         st.awaitingWallet = false;
+        st.awaitingWalletNewPin = false;
         st.awaitingClaim = false;
         st.awaitingPrice = false;
         p.closeInventory();
-        plugin.msg(p, "请输入首次存入时显示的 6 位钱包码。cancel 取消。");
+        if (st.walletPinForChange) {
+            plugin.msg(p, "请输入现在的 6 位钱包码。核对无误后，即可设置新码。cancel 取消。");
+        } else {
+            plugin.msg(p, "请输入 6 位钱包码。本页随时能再看。cancel 取消。");
+        }
+    }
+
+    public void showWalletPin(Player p) {
+        if (!plugin.claimCodeEnabled()) {
+            plugin.msg(p, "本服暂未开启钱包码。");
+            return;
+        }
+        if (!plugin.store().ready()) {
+            plugin.msg(p, "互通数据库尚未连上，请稍后再试。");
+            return;
+        }
+        async(() -> {
+            String code;
+            boolean has;
+            try {
+                code = plugin.store().walletClaimPlain(p.getUniqueId());
+                has = plugin.store().walletHasClaim(p.getUniqueId());
+            } catch (Exception e) {
+                sync(() -> plugin.msg(p, "暂时无法读取钱包码，请稍后再试。"));
+                return;
+            }
+            sync(() -> {
+                if (code != null && !code.isBlank()) {
+                    plugin.msg(p, "&e钱包码 &f" + code + " &7本页随时能再看，也可以改成更好记的。请自己留着，不要发给别人。");
+                    return;
+                }
+                if (has) {
+                    plugin.msg(p, "较早的钱包码只在当时显示过一次，现在无法再取回。若你还记得，请点「修改」换成新的；若已经忘记，请联系管理执行 /link pinreset。");
+                    return;
+                }
+                plugin.msg(p, "还没有钱包码。请先存入一点金额。");
+            });
+        });
+    }
+
+    public void beginWalletChangePin(Player p) {
+        if (!plugin.claimCodeEnabled()) {
+            plugin.msg(p, "本服暂未开启钱包码。");
+            return;
+        }
+        if (!plugin.store().ready()) {
+            plugin.msg(p, "互通数据库尚未连上，请稍后再试。");
+            return;
+        }
+        Sessions.State st = plugin.sessions().of(p);
+        async(() -> {
+            boolean has;
+            try {
+                has = plugin.store().walletHasClaim(p.getUniqueId());
+            } catch (Exception e) {
+                sync(() -> plugin.msg(p, "无法读取钱包。"));
+                return;
+            }
+            sync(() -> {
+                if (!has) {
+                    plugin.msg(p, "还没有钱包码。请先存入一点金额。");
+                    openWallet(p);
+                    return;
+                }
+                if (st.walletUnlocked) {
+                    beginWalletNewPin(p);
+                    return;
+                }
+                st.walletPinForChange = true;
+                beginWalletPin(p);
+            });
+        });
+    }
+
+    public void beginWalletNewPin(Player p) {
+        String lock = plugin.claimLocked(p);
+        if (lock != null) {
+            plugin.msg(p, lock);
+            return;
+        }
+        Sessions.State st = plugin.sessions().of(p);
+        st.awaitingWalletNewPin = true;
+        st.awaitingWalletPin = false;
+        st.awaitingWallet = false;
+        st.walletPinForChange = false;
+        st.awaitingClaim = false;
+        st.awaitingPrice = false;
+        p.closeInventory();
+        plugin.msg(p, "请输入新的 6 位数字作为钱包码。cancel 取消。");
+    }
+
+    public void finishWalletNewPin(Player p, String raw) {
+        Sessions.State st = plugin.sessions().of(p);
+        st.awaitingWalletNewPin = false;
+        String lock = plugin.claimLocked(p);
+        if (lock != null) {
+            plugin.msg(p, lock);
+            return;
+        }
+        if (!ClaimCodes.plausible(raw)) {
+            plugin.msg(p, "钱包码需要 6 位数字。");
+            openWallet(p);
+            return;
+        }
+        String pin = ClaimCodes.normalize(raw);
+        async(() -> {
+            try {
+                plugin.store().walletSetClaim(p.getUniqueId(), pin);
+            } catch (Exception e) {
+                sync(() -> {
+                    plugin.msg(p, e.getMessage() == null ? "这次没能改成，请稍后再试。" : e.getMessage());
+                    openWallet(p);
+                });
+                return;
+            }
+            sync(() -> {
+                st.walletUnlocked = true;
+                plugin.msg(p, "&e已为你改好钱包码 &f" + pin + " &7请自己留着，不要发给别人。");
+                openWallet(p);
+            });
+        });
     }
 
     public void finishWalletPin(Player p, String raw) {
         Sessions.State st = plugin.sessions().of(p);
         st.awaitingWalletPin = false;
+        boolean forChange = st.walletPinForChange;
+        st.walletPinForChange = false;
         String lock = plugin.claimLocked(p);
         if (lock != null) {
             plugin.msg(p, lock);
@@ -1381,13 +1517,14 @@ public final class LinkGui {
         }
         if (!ClaimCodes.plausible(raw)) {
             plugin.claimFail(p);
-            plugin.msg(p, "钱包码应为 6 位数字。");
+            plugin.msg(p, "钱包码需要 6 位数字。");
             return;
         }
         async(() -> {
             boolean ok;
             try {
                 ok = plugin.store().walletClaimOk(p.getUniqueId(), raw);
+                if (ok) plugin.store().walletRememberCode(p.getUniqueId(), raw);
             } catch (Exception e) {
                 sync(() -> plugin.msg(p, "校验失败。"));
                 return;
@@ -1395,12 +1532,16 @@ public final class LinkGui {
             sync(() -> {
                 if (!ok) {
                     plugin.claimFail(p);
-                    plugin.msg(p, "钱包码不正确。");
+                    plugin.msg(p, "钱包码不正确，请再试一次。");
                     return;
                 }
                 plugin.claimOk(p);
                 st.walletUnlocked = true;
-                plugin.msg(p, "钱包码已验证。本会话内可以取出。");
+                if (forChange) {
+                    beginWalletNewPin(p);
+                    return;
+                }
+                plugin.msg(p, "已经核对过了。这次登录可以取出。");
                 openWallet(p);
             });
         });
@@ -1463,7 +1604,7 @@ public final class LinkGui {
                     plugin.msg(p, "已存入本服 " + plugin.money(local)
                             + "（互通 " + ESLinkPlugin.stripZeros(link) + "）。到另一台服打开互通余额即可取出。");
                     if (code != null && !code.isBlank()) {
-                        plugin.msg(p, "&e钱包码 &f" + code + " &7请记下。取出时必须输入此码。不要发给别人。");
+                        plugin.msg(p, "&e钱包码 &f" + code + " &7本页随时能再看，也可以自己修改。请自己留着，不要发给别人。");
                     }
                     openWallet(p);
                 });

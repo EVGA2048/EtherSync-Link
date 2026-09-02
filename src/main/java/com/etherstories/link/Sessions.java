@@ -30,6 +30,8 @@ public final class Sessions {
         public boolean awaitingClaim;
         public long claimListingId;
         public boolean awaitingWalletPin;
+        public boolean awaitingWalletNewPin;
+        public boolean walletPinForChange;
         public boolean walletUnlocked;
         public long repriceId;
         public int listAmount;
