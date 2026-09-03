@@ -46,14 +46,16 @@ public final class ChestNet {
                         cached = List.copyOf(chests);
                         for (var c : chests) {
                             String snap = c.unit() + "|" + c.peerUnit() + "|" + (c.pairCode() == null ? "" : c.pairCode())
-                                    + "|" + c.status() + "|" + c.role() + "|" + c.bounceId();
+                                    + "|" + c.status() + "|" + c.role() + "|" + c.bounceId()
+                                    + "|" + waitSec(c.id());
                             if (!snap.equals(signSnap.get(c.id()))) {
-                                refreshSign(c);
+                                refreshSign(c, false);
                                 signSnap.put(c.id(), snap);
                             }
                             if (plugin.transportEnabled()
                                     && "TX".equals(c.role()) && c.pairCode() != null && !c.pairCode().isBlank()
-                                    && !"paused".equals(c.status())) {
+                                    && !"paused".equals(c.status())
+                                    && block(c) != null) {
                                 drainTx(c);
                             }
                         }
@@ -73,19 +75,23 @@ public final class ChestNet {
     }
 
     public void refreshSign(Models.ChestRow c) {
+        refreshSign(c, true);
+    }
+
+    public void refreshSign(Models.ChestRow c, boolean placeIfMissing) {
         if (c == null) return;
         try {
-            refreshSign0(c);
+            refreshSign0(c, placeIfMissing);
         } catch (Throwable t) {
             plugin.getLogger().warning("刷新牌子失败 UNIT " + c.unit() + ": " + t.getMessage());
         }
     }
 
-    private void refreshSign0(Models.ChestRow c) {
+    private void refreshSign0(Models.ChestRow c, boolean placeIfMissing) {
         Block b = block(c);
         if (b == null) return;
         Sign sign = ChestListener.findSign(b);
-        if (sign == null) sign = ChestListener.ensureSign(b, ChestListener.parseFace(c.signFace()));
+        if (sign == null && placeIfMissing) sign = ChestListener.ensureSign(b, ChestListener.parseFace(c.signFace()));
         if (sign != null) rememberSignFace(c, ChestListener.faceOf(sign));
         String other = (c.pairCode() == null || c.pairCode().isBlank()) ? "" : otherServer(c.pairCode());
         String via = NodeSigns.via(plugin, c.role(), c.pairCode(), other);
@@ -105,7 +111,10 @@ public final class ChestNet {
         int wait = NodeSigns.trouble(displayStatus) ? 0 : waitSec(c.id());
         NodeSigns.write(sign, "chest", c.role(), c.unit(), peer, via, displayStatus, wait);
         if (b.getState() instanceof Chest chest) {
-            chest.setCustomName(NodeSigns.chestTitle(c.role(), c.unit(), peer, displayStatus, wait));
+            String title = NodeSigns.chestTitle(c.role(), c.unit(), peer, displayStatus, wait);
+            String cur = chest.getCustomName();
+            if (title != null && title.equals(cur)) return;
+            chest.setCustomName(title);
             chest.update();
         }
     }
@@ -114,7 +123,12 @@ public final class ChestNet {
         for (Models.ChestRow c : cached) {
             Block b = block(c);
             if (b == null) continue;
-            refreshSign(c);
+            String snap = c.unit() + "|" + c.peerUnit() + "|" + (c.pairCode() == null ? "" : c.pairCode())
+                    + "|" + c.status() + "|" + c.role() + "|" + c.bounceId()
+                    + "|" + waitSec(c.id());
+            if (snap.equals(signSnap.get(c.id()))) continue;
+            refreshSign(c, false);
+            signSnap.put(c.id(), snap);
         }
     }
 

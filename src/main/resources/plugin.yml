@@ -1,5 +1,5 @@
 name: ESLink
-version: 0.2.9
+version: 0.2.10
 main: com.etherstories.link.ESLinkPlugin
 api-version: "1.21"
 description: 跨服互通大厅、市场服务与 TX/RX 箱
@@ -10,7 +10,7 @@ commands:
   link:
     description: 打开互通大厅
     usage: /link
-    aliases: [eslink, "互通"]
+    aliases: [eslink, sync, "互通"]
 
 permissions:
   eslink.use:

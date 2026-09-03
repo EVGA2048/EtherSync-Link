@@ -58,9 +58,11 @@ public final class Compat {
         try {
             Collection<String> keys = ItemKeys.allKeys();
             if (keys.isEmpty()) return;
+            int count = keys.size();
+            if (selfDigest != null && count == selfCount) return;
             byte[] packed = pack(keys);
             String digest = sha1(packed);
-            selfCount = keys.size();
+            selfCount = count;
             if (digest.equals(selfDigest)) return;
             plugin.store().publishRegistry(plugin.serverCode(), digest, keys.size(), packed);
             selfDigest = digest;

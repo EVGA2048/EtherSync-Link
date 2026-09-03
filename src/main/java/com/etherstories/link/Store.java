@@ -36,10 +36,11 @@ public final class Store {
                 + "?useSSL=false&allowPublicKeyRetrieval=true&characterEncoding=utf8");
         hc.setUsername(user);
         hc.setPassword(pass);
-        hc.setMaximumPoolSize(4);
+        hc.setMaximumPoolSize(8);
         hc.setMinimumIdle(0);
         hc.setPoolName("ESLink");
-        hc.setConnectionTimeout(8000);
+        hc.setConnectionTimeout(3000);
+        hc.setLeakDetectionThreshold(15000);
         try {
             ds = new HikariDataSource(hc);
             try (Connection c = ds.getConnection()) {
@@ -2016,7 +2017,7 @@ public final class Store {
         if (pairCode == null || pairCode.isBlank()) return out;
         try (Connection c = ds.getConnection();
              PreparedStatement ps = c.prepareStatement(
-                     "SELECT id, level, event_time_ms FROM link_io_events WHERE pair_code=? AND id>? ORDER BY id ASC")) {
+                     "SELECT id, level, event_time_ms FROM link_io_events WHERE pair_code=? AND id>? ORDER BY id ASC LIMIT 64")) {
             ps.setString(1, pairCode);
             ps.setLong(2, afterId);
             ResultSet rs = ps.executeQuery();

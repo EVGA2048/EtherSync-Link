@@ -14,6 +14,8 @@ import org.bukkit.block.data.BlockData;
 import org.bukkit.entity.Player;
 
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Queue;
@@ -47,6 +49,7 @@ public final class IoNet {
     private final Map<Integer, Long> lastEventId = new ConcurrentHashMap<>();
     private final Map<Integer, ReplaySession> replaySessions = new ConcurrentHashMap<>();
     private volatile long cacheAtMs;
+    private volatile long lastPruneMs;
 
     public static class ReplaySession {
         public final Queue<Models.IoEvent> queue = new java.util.concurrent.ConcurrentLinkedQueue<>();
@@ -127,79 +130,44 @@ public final class IoNet {
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
             try {
                 var nodes = plugin.store().ioOn(plugin.serverCode());
-                
-                // 定期清理极度过期的事件（保留15秒内的事件记录，保持表大小极小）
-                try {
-                    plugin.store().pruneIoEvents(15000L);
-                } catch (Exception ignored) {
+                long now = System.currentTimeMillis();
+                if (now - lastPruneMs > 30_000L) {
+                    lastPruneMs = now;
+                    try {
+                        plugin.store().pruneIoEvents(15000L);
+                    } catch (Exception ignored) {
+                    }
+                }
+
+                Map<String, Long> warmAfter = new HashMap<>();
+                Set<String> coldPairs = new HashSet<>();
+                for (var n : nodes) {
+                    if (!"RX".equals(n.role())) continue;
+                    String pair = n.pairCode();
+                    if (pair == null || pair.isBlank()) continue;
+                    Long lastId = lastEventId.get(n.id());
+                    if (lastId == null) coldPairs.add(pair);
+                    else warmAfter.merge(pair, lastId, Math::min);
+                }
+                Map<String, Long> coldMax = new HashMap<>();
+                for (String pair : coldPairs) {
+                    try {
+                        coldMax.put(pair, plugin.store().maxIoEventId(pair));
+                    } catch (Exception ignored) {
+                    }
+                }
+                Map<String, List<Models.IoEvent>> fresh = new HashMap<>();
+                for (var e : warmAfter.entrySet()) {
+                    try {
+                        List<Models.IoEvent> ev = plugin.store().ioEventsAfter(e.getKey(), e.getValue());
+                        if (!ev.isEmpty()) fresh.put(e.getKey(), ev);
+                    } catch (Exception ignored) {
+                    }
                 }
 
                 Bukkit.getScheduler().runTask(plugin, () -> {
                     try {
-                        local.clear();
-                        txKeys.clear();
-                        rxKeys.clear();
-                        blockCache.clear();
-                        cacheAtMs = System.currentTimeMillis();
-                        for (var n : nodes) {
-                            local.put(n.id(), n);
-                            if ("TX".equals(n.role())) {
-                                txKeys.add(ESLinkPlugin.locKey(n.world(), n.x(), n.y(), n.z()));
-                            }
-                            if ("RX".equals(n.role())) {
-                                rxKeys.add(ESLinkPlugin.locKey(n.world(), n.x(), n.y(), n.z()));
-                                Block body = block(n);
-                                if (body != null && loaded(body)) {
-                                    ensureBody(n, body);
-                                    // 标靶被箭射中会被原版清零，实际输出和我们记的对不上就重发。
-                                    Integer want = hold.get(n.id());
-                                    if (want != null && readSignal(body) != want) hold.remove(n.id());
-                                }
-
-                                String pair = n.pairCode();
-                                if (pair != null && !pair.isBlank()) {
-                                    Long lastId = lastEventId.get(n.id());
-                                    if (lastId == null) {
-                                        // 首次加载（冷启动）：拉取当前最大事件 ID 作为基准线，以 peerLevel() 作为初始物理电平
-                                        Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
-                                            try {
-                                                long maxId = plugin.store().maxIoEventId(pair);
-                                                Bukkit.getScheduler().runTask(plugin, () -> {
-                                                    lastEventId.put(n.id(), maxId);
-                                                    if (local.containsKey(n.id())) {
-                                                        applyRx(n, block(n), NodeSigns.mapLogic(n.logic(), true, n.peerLevel()));
-                                                    }
-                                                });
-                                            } catch (Exception ignored) {
-                                            }
-                                        });
-                                    } else {
-                                        // 正常轮询：拉取新发生的改变事件，追加到播放队列中
-                                        Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
-                                            try {
-                                                var events = plugin.store().ioEventsAfter(pair, lastId);
-                                                if (!events.isEmpty()) {
-                                                    Bukkit.getScheduler().runTask(plugin, () -> {
-                                                        if (local.containsKey(n.id())) {
-                                                            ReplaySession s = replaySessions.computeIfAbsent(n.id(), id -> new ReplaySession());
-                                                            s.queue.addAll(events);
-                                                            lastEventId.put(n.id(), events.get(events.size() - 1).id());
-                                                        }
-                                                    });
-                                                }
-                                            } catch (Exception ignored) {
-                                            }
-                                        });
-                                    }
-                                }
-                            }
-                            String st = signStatus(n);
-                            String snap = n.unit() + "|" + n.peerUnit() + "|" + st;
-                            if (!snap.equals(signSnap.get(n.id()))) {
-                                refreshSign(n);
-                                signSnap.put(n.id(), snap);
-                            }
-                        }
+                        applyPoll(nodes, coldMax, fresh);
                     } finally {
                         polling.set(false);
                     }
@@ -209,6 +177,65 @@ public final class IoNet {
                 plugin.getLogger().warning("红石节点扫描失败: " + e.getMessage());
             }
         });
+    }
+
+    private void applyPoll(List<Models.IoRow> nodes, Map<String, Long> coldMax,
+                           Map<String, List<Models.IoEvent>> fresh) {
+        Set<Integer> seen = new HashSet<>();
+        txKeys.clear();
+        rxKeys.clear();
+        cacheAtMs = System.currentTimeMillis();
+        for (var n : nodes) {
+            seen.add(n.id());
+            local.put(n.id(), n);
+            if ("TX".equals(n.role())) {
+                txKeys.add(ESLinkPlugin.locKey(n.world(), n.x(), n.y(), n.z()));
+            }
+            if ("RX".equals(n.role())) {
+                rxKeys.add(ESLinkPlugin.locKey(n.world(), n.x(), n.y(), n.z()));
+                Block body = block(n);
+                if (body != null && loaded(body)) {
+                    ensureBody(n, body);
+                    Integer want = hold.get(n.id());
+                    if (want != null && readSignal(body) != want) hold.remove(n.id());
+                }
+                String pair = n.pairCode();
+                if (pair != null && !pair.isBlank()) {
+                    Long lastId = lastEventId.get(n.id());
+                    if (lastId == null) {
+                        Long maxId = coldMax.get(pair);
+                        if (maxId != null) {
+                            lastEventId.put(n.id(), maxId);
+                            Block rx = block(n);
+                            if (rx != null) {
+                                applyRx(n, rx, NodeSigns.mapLogic(n.logic(), true, n.peerLevel()));
+                            }
+                        }
+                    } else {
+                        List<Models.IoEvent> events = fresh.get(pair);
+                        if (events != null && !events.isEmpty()) {
+                            ReplaySession s = replaySessions.computeIfAbsent(n.id(), id -> new ReplaySession());
+                            long cursor = lastId;
+                            for (Models.IoEvent ev : events) {
+                                if (ev.id() <= lastId) continue;
+                                s.queue.add(ev);
+                                if (ev.id() > cursor) cursor = ev.id();
+                            }
+                            lastEventId.put(n.id(), cursor);
+                        }
+                    }
+                }
+            }
+            String st = signStatus(n);
+            String snap = n.unit() + "|" + n.peerUnit() + "|" + st;
+            if (!snap.equals(signSnap.get(n.id()))) {
+                refreshSign(n, false);
+                signSnap.put(n.id(), snap);
+            }
+        }
+        local.keySet().removeIf(id -> !seen.contains(id));
+        blockCache.keySet().removeIf(id -> !seen.contains(id));
+        lastEventId.keySet().removeIf(id -> !seen.contains(id));
     }
 
     public boolean isTx(String world, int x, int y, int z) {
@@ -267,7 +294,11 @@ public final class IoNet {
         for (Models.IoRow n : local.values()) {
             Block b = block(n);
             if (b == null || !loaded(b)) continue;
-            refreshSign(n);
+            String st = signStatus(n);
+            String snap = n.unit() + "|" + n.peerUnit() + "|" + st;
+            if (snap.equals(signSnap.get(n.id()))) continue;
+            refreshSign(n, false);
+            signSnap.put(n.id(), snap);
         }
     }
 
@@ -279,12 +310,17 @@ public final class IoNet {
     }
 
     public void refreshSign(Models.IoRow n) {
+        refreshSign(n, true);
+    }
+
+    public void refreshSign(Models.IoRow n, boolean placeIfMissing) {
         if (n == null) return;
         local.put(n.id(), n);
         Block b = block(n);
         if (b == null || !loaded(b)) return;
         Sign sign = ChestListener.findSign(b);
-        if (sign == null) sign = ChestListener.ensureSign(b, null);
+        if (sign == null && placeIfMissing) sign = ChestListener.ensureSign(b, null);
+        if (sign == null) return;
         String other = (n.pairCode() == null || n.pairCode().isBlank()) ? "" : otherServer(n.pairCode());
         String via = NodeSigns.via(plugin, n.role(), n.pairCode(), other);
         NodeSigns.write(sign, "io", n.role(), n.unit(), n.peerUnit(), via, signStatus(n));
@@ -450,6 +486,7 @@ public final class IoNet {
         int lv = clamp(level);
         if (hold.getOrDefault(n.id(), Integer.MIN_VALUE) == lv) return;
         hold.put(n.id(), lv);
+        if (node == null || !loaded(node)) return;
         writeSignal(node, lv);
         notifyPower(node, lv);
         signLater(n);
@@ -604,7 +641,7 @@ public final class IoNet {
         Long last = signAt.get(n.id());
         if (last != null && now - last < SIGN_MIN_GAP_MS) return;
         signAt.put(n.id(), now);
-        refreshSign(n);
+        refreshSign(n, false);
     }
 
     private void forget(int id) {
@@ -694,10 +731,17 @@ public final class IoNet {
         return p[0].equalsIgnoreCase(self) ? p[1] : p[0];
     }
     private Block block(Models.IoRow n) {
-        return blockCache.computeIfAbsent(n.id(), id -> {
-            World w = Bukkit.getWorld(n.world());
-            if (w == null) return null;
-            return w.getBlockAt(n.x(), n.y(), n.z());
-        });
+        Block cached = blockCache.get(n.id());
+        if (cached != null) {
+            if (loaded(cached)) return cached;
+            blockCache.remove(n.id());
+            return null;
+        }
+        World w = Bukkit.getWorld(n.world());
+        if (w == null) return null;
+        if (!w.isChunkLoaded(n.x() >> 4, n.z() >> 4)) return null;
+        Block b = w.getBlockAt(n.x(), n.y(), n.z());
+        blockCache.put(n.id(), b);
+        return b;
     }
 }
