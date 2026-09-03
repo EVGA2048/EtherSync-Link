@@ -4,8 +4,6 @@
 
 跨服务器物品、红石、聊天与市场互通
 
-*曾用名 ESLink · 游戏内插件名仍为 ESLink*
-
 [中文](README.md) · [English](README.en.md)
 
 [![Release](https://img.shields.io/github/v/release/EVGA2048/EtherSync-Link)](https://github.com/EVGA2048/EtherSync-Link/releases)
@@ -17,9 +15,7 @@
 
 ---
 
-**EtherSync** 是一套面向 Paper / Bukkit 的跨服互通插件。多台服务器共用同一份 MySQL 后，玩家可在大厅查看对端是否在线，并通过市场、运输箱、红石与聊天彼此往来。游戏内指令为 `/link`，别名 `/eslink`、`/互通`。当前发行包文件名仍为 `ESLink-<版本>.jar`，`plugin.yml` 中的插件名仍为 **ESLink**，与 ES2UniPlugin 等软依赖按此名称识别。
-
-本项目仍在持续演进。版本号以 [`src/main/resources/plugin.yml`](src/main/resources/plugin.yml) 与 [GitHub Releases](https://github.com/EVGA2048/EtherSync-Link/releases) 为准；新版本可能增补配置键，但不会改写您已经填写的值。若您在使用中遇到问题，或希望提出改进，欢迎提交 [Issue](https://github.com/EVGA2048/EtherSync-Link/issues) 或 [Pull Request](https://github.com/EVGA2048/EtherSync-Link/pulls)。
+**EtherSync** 是一套面向 Paper / Bukkit 的跨服互通插件。多台服务器共用同一份 MySQL 后，玩家可在大厅查看对端是否在线，并通过市场、运输箱、红石与聊天彼此往来。游戏内指令为 `/link`，别名 `/eslink`、`/互通`。版本号以 [`src/main/resources/plugin.yml`](src/main/resources/plugin.yml) 与 [GitHub Releases](https://github.com/EVGA2048/EtherSync-Link/releases) 为准；新版本可能增补配置键，但不会改写您已经填写的值。
 
 ## 目录
 
@@ -36,13 +32,14 @@
 - [配置键](#配置键)
 - [指令与权限](#指令与权限)
 - [构建](#构建)
+- [适用范围与参与](#适用范围与参与)
 - [许可证](#许可证)
 
 ---
 
 ## 介绍
 
-EtherSync 最初为两台模组构成接近的生存服务器而写：玩家往返两地时，箱子与生产线无法随人过去。其中一台即 EtherStories（以太物语）。项目因此做成「大厅 + 节点」：在本服打开 `/link`，即可看到对端状态，并办理市场、运输、红石与聊天。
+EtherSync 最初为两台模组构成接近的生存服务器而写：玩家往返两地时，箱子与生产线无法随人过去。其中一台即 EtherStories（以太物语）。项目因此做成「大厅 + 节点」：在本服打开 `/link`，即可看到对端状态，并办理市场、运输、红石与聊天。游戏内插件名为 ESLink，发行文件亦使用这一名称，以便既有软依赖（例如 ES2UniPlugin）按插件名识别。
 
 请先明确它**不会**做的事情，以免按实时管道或跨服银行来理解：
 
@@ -296,6 +293,12 @@ mvn -q package
 ```
 
 产物位于 `target/ESLink-<version>.jar`，并会再复制一份到 `dist/`。请将当前版本的这一份用于部署，而不要混用目录中的旧文件。
+
+## 适用范围与参与
+
+本插件建议用于公益服务器之间的互通，不建议与以营利为目的的商业服务器相互连接。即便同为公益服，也请仅接入您充分信任、能够共同维护安全的服务器。互通一旦建立，物品、聊天与部分经济数据便会在两端之间流动；接入不可信的节点，可能带来安全风险。
+
+本插件目前仍处于测试阶段，功能与配置仍可能调整。欢迎您加入开发与讨论；若发现缺陷，请通过 [Issue](https://github.com/EVGA2048/EtherSync-Link/issues) 反馈。改进亦欢迎以 [Pull Request](https://github.com/EVGA2048/EtherSync-Link/pulls) 的形式提交。
 
 ## 许可证
 

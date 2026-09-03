@@ -4,8 +4,6 @@
 
 Cross-server items, redstone, chat, and marketplace
 
-*Formerly ESLink · the in-game plugin name remains ESLink*
-
 [中文](README.md) · [English](README.en.md)
 
 [![Release](https://img.shields.io/github/v/release/EVGA2048/EtherSync-Link)](https://github.com/EVGA2048/EtherSync-Link/releases)
@@ -17,9 +15,7 @@ Cross-server items, redstone, chat, and marketplace
 
 ---
 
-**EtherSync** is a Paper / Bukkit plugin for linking several Minecraft servers. Once every server shares the same MySQL database, players can open a lobby to see whether the other side is online, then trade, move items, pulse redstone, and talk across the network. The in-game command is `/link`, with aliases `/eslink` and `/互通`. Release artifacts are still named `ESLink-<version>.jar`, and `plugin.yml` still registers the plugin as **ESLink**, which is the name soft-dependents such as ES2UniPlugin look up.
-
-The project continues to evolve. Please treat [`src/main/resources/plugin.yml`](src/main/resources/plugin.yml) and [GitHub Releases](https://github.com/EVGA2048/EtherSync-Link/releases) as the source of truth for the version number. Newer builds may add configuration keys; values you have already set are left untouched. Questions, issues, and improvements are welcome as an [Issue](https://github.com/EVGA2048/EtherSync-Link/issues) or a [Pull Request](https://github.com/EVGA2048/EtherSync-Link/pulls).
+**EtherSync** is a Paper / Bukkit plugin for linking several Minecraft servers. Once every server shares the same MySQL database, players can open a lobby to see whether the other side is online, then trade, move items, pulse redstone, and talk across the network. The in-game command is `/link`, with aliases `/eslink` and `/互通`. Please treat [`src/main/resources/plugin.yml`](src/main/resources/plugin.yml) and [GitHub Releases](https://github.com/EVGA2048/EtherSync-Link/releases) as the source of truth for the version number. Newer builds may add configuration keys; values you have already set are left untouched.
 
 ## Contents
 
@@ -36,13 +32,14 @@ The project continues to evolve. Please treat [`src/main/resources/plugin.yml`](
 - [Configuration keys](#configuration-keys)
 - [Commands and permissions](#commands-and-permissions)
 - [Building](#building)
+- [Intended use and participation](#intended-use-and-participation)
 - [License](#license)
 
 ---
 
 ## Introduction
 
-EtherSync began on two survival servers whose mod lists were close enough that players moved between them, while chests and production lines could not. One of those servers was EtherStories. The plugin is therefore built around a lobby and a set of nodes: open `/link` on your own server to see the other side, then handle the market, transport, redstone, and chat.
+EtherSync began on two survival servers whose mod lists were close enough that players moved between them, while chests and production lines could not. One of those servers was EtherStories. The plugin is therefore built around a lobby and a set of nodes: open `/link` on your own server to see the other side, then handle the market, transport, redstone, and chat. In game the plugin is registered as ESLink, and release files use that name, so existing soft-dependents such as ES2UniPlugin can still find it.
 
 Please read what it **does not** do, so it is not mistaken for a live pipe or a cross-server bank:
 
@@ -296,6 +293,12 @@ mvn -q package
 ```
 
 The artifact is `target/ESLink-<version>.jar`, and a copy is placed in `dist/`. Deploy the file that matches the current version; do not mix older copies from that folder.
+
+## Intended use and participation
+
+This plugin is intended for community, non-commercial servers. Linking it with a for-profit commercial server is not recommended. Even among community servers, please connect only to hosts you trust and can keep secure together. Once a link is established, items, chat, and some economic data move between the two sides; joining an untrusted node may introduce security risk.
+
+The plugin is still in testing. Behaviour and configuration may still change. You are welcome to join development and discussion. Please report defects through an [Issue](https://github.com/EVGA2048/EtherSync-Link/issues). Improvements may also be sent as a [Pull Request](https://github.com/EVGA2048/EtherSync-Link/pulls).
 
 ## License
 
