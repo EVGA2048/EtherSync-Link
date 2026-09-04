@@ -12,6 +12,8 @@ mysql:
   database: eslink
   user: root
   password: ""
+  # 首次连库等待（毫秒）。ZeroTier / 跨网段建议 15000 以上，不要低于 5000。
+  connect-timeout-ms: 15000
 
 server:
   # 内部代号，唯一，只能字母数字。牌子配对用，玩家界面一般不显示。

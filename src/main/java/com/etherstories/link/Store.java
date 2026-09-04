@@ -30,16 +30,18 @@ public final class Store {
         String user = cfg.getString("mysql.user", "root");
         String pass = cfg.getString("mysql.password", "");
         if (pass == null) pass = "";
+        int timeout = Math.max(5000, Math.min(60000, cfg.getInt("mysql.connect-timeout-ms", 15000)));
 
         HikariConfig hc = new HikariConfig();
         hc.setJdbcUrl("jdbc:mysql://" + host + ":" + port + "/" + db
-                + "?useSSL=false&allowPublicKeyRetrieval=true&characterEncoding=utf8");
+                + "?useSSL=false&allowPublicKeyRetrieval=true&characterEncoding=utf8"
+                + "&connectTimeout=" + timeout);
         hc.setUsername(user);
         hc.setPassword(pass);
         hc.setMaximumPoolSize(8);
         hc.setMinimumIdle(0);
         hc.setPoolName("ESLink");
-        hc.setConnectionTimeout(3000);
+        hc.setConnectionTimeout(timeout);
         hc.setLeakDetectionThreshold(15000);
         try {
             ds = new HikariDataSource(hc);
