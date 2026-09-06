@@ -295,10 +295,13 @@ public final class LinkCommand implements TabExecutor {
             return;
         }
         if (sub.equals("retry") || sub.equals("重试")) {
-            ContainerSupport.clearTrip();
-            new java.io.File(plugin.getDataFolder(), "probe.lock").delete();
-            ContainerSupport.probe(plugin);
-            plugin.msg(p, "&a容器自检已开始（后台跑，几秒后再 /link diag 看结果）");
+            if (ContainerSupport.mode() == ContainerSupport.Mode.OFF) {
+                plugin.msg(p, "&e容器传输已在 config 里关闭，不启动自检");
+            } else if (ContainerSupport.retryProbe(plugin)) {
+                plugin.msg(p, "&a容器自检已开始（后台跑，几秒后再 /link diag 看结果）");
+            } else {
+                plugin.msg(p, "&e容器自检已在运行，请稍后再看 /link diag");
+            }
             return;
         }
         plugin.msg(p, "&8—— 容器诊断 " + plugin.getDescription().getVersion() + " ——");

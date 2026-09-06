@@ -8,8 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * 钉住 issue #6 / 0.2.11 的容器封禁语义，以及 0.2.12 仍留下的运行时 trip。
- * 下一步会把「禁用拆包」和「全局停运」拆开，到时改这些断言。
+ * issue #6 回归：单件重建问题只能降级对应类型的拆包，不能停掉全部容器。
  */
 class ContainerSupportRegressionTest {
 
@@ -20,29 +19,58 @@ class ContainerSupportRegressionTest {
     }
 
     @Test
-    void vanillaItemsStaySendableAfterTrip() {
-        ContainerSupport.trip("RX #12 create:package 构建过慢 80ms");
-        assertTrue(ContainerSupport.allow("minecraft:iron_ingot"));
-        assertTrue(ContainerSupport.allow("minecraft:stone"));
-    }
+    void packageFailureOnlyDegradesPackageSplitting() {
+        ContainerSupport.configure("on");
+        assertTrue(ContainerSupport.splittable("minecraft:shulker_box"));
+        assertTrue(ContainerSupport.splittable("create:package"));
 
-    @Test
-    void runtimeTripStillBlocksEveryContainer() {
+        ContainerSupport.degradeToWhole("create:package", "RX #12 create:package 构建过慢 80ms");
+
+        assertTrue(ContainerSupport.allow("minecraft:iron_ingot"));
         assertTrue(ContainerSupport.allow("minecraft:shulker_box"));
         assertTrue(ContainerSupport.allow("create:package"));
-        ContainerSupport.trip("RX #12 create:package 构建过慢 80ms");
-        assertFalse(ContainerSupport.allow("minecraft:shulker_box"),
-                "0.2.12 仍用 trip 一刀切；issue #6 的「牌子无反应」由此复发");
-        assertFalse(ContainerSupport.allow("create:package"));
-        assertTrue(ContainerSupport.blockReason("create:package").contains("熔断"));
+        assertTrue(ContainerSupport.splittable("minecraft:shulker_box"));
+        assertFalse(ContainerSupport.splittable("create:package"));
+        assertTrue(ContainerSupport.splittable("othermod:package"));
+        assertTrue(ContainerSupport.lines().stream().anyMatch(s -> s.contains("create:package 已改走整包")));
     }
 
     @Test
-    void configOffBlocksContainersWithoutTripping() {
+    void genericFailureDoesNotDisablePackages() {
+        ContainerSupport.configure("on");
+
+        ContainerSupport.degradeToWhole("minecraft:shulker_box",
+                "RX #13 minecraft:shulker_box 构建失败");
+
+        assertTrue(ContainerSupport.allow("minecraft:shulker_box"));
+        assertTrue(ContainerSupport.allow("create:package"));
+        assertFalse(ContainerSupport.splittable("minecraft:shulker_box"));
+        assertTrue(ContainerSupport.splittable("create:package"));
+        assertTrue(ContainerSupport.lines().stream().anyMatch(s -> s.contains("minecraft:shulker_box 已改走整包")));
+    }
+
+    @Test
+    void autoModeUsesCreateProbeOnlyForCreatePackages() {
+        ContainerSupport.configure("auto");
+        ContainerSupport.setProbeResultForTests(true, false);
+        assertTrue(ContainerSupport.splittable("minecraft:shulker_box"));
+        assertFalse(ContainerSupport.splittable("create:package"));
+        assertTrue(ContainerSupport.splittable("othermod:package"));
+
+        ContainerSupport.setProbeResultForTests(false, true);
+        assertFalse(ContainerSupport.splittable("minecraft:shulker_box"));
+        assertTrue(ContainerSupport.splittable("create:package"));
+        assertFalse(ContainerSupport.splittable("othermod:package"));
+    }
+
+    @Test
+    void configOffBlocksAllContainersAndSkipsProbe() {
         ContainerSupport.configure("off");
         assertFalse(ContainerSupport.allow("minecraft:shulker_box"));
         assertFalse(ContainerSupport.splittable("minecraft:shulker_box"));
         assertTrue(ContainerSupport.allow("minecraft:diamond"));
+        assertFalse(ContainerSupport.probe(null));
+        assertFalse(ContainerSupport.retryProbe(null));
     }
 
     @Test
@@ -62,10 +90,14 @@ class ContainerSupportRegressionTest {
     }
 
     @Test
-    void clearTripRestoresAllow() {
-        ContainerSupport.trip("自检占用主线程 2400ms");
-        ContainerSupport.clearTrip();
+    void clearDegradeRestoresSplittingInForcedMode() {
+        ContainerSupport.configure("on");
+        ContainerSupport.degradeToWhole("minecraft:shulker_box", "generic slow");
+        ContainerSupport.degradeToWhole("create:package", "package slow");
+        ContainerSupport.clearDegrade();
         assertTrue(ContainerSupport.allow("minecraft:shulker_box"));
         assertTrue(ContainerSupport.allow("create:package"));
+        assertTrue(ContainerSupport.splittable("minecraft:shulker_box"));
+        assertTrue(ContainerSupport.splittable("create:package"));
     }
 }

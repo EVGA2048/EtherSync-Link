@@ -182,8 +182,8 @@ public final class ESLinkPlugin extends JavaPlugin {
             loadTransportState();
             vault.hook();
             ContainerSupport.configure(getConfig().getString("chest.containers", "auto"));
-            ContainerSupport.clearTrip();
-            ContainerSupport.probe(this);
+            ContainerSupport.clearDegrade();
+            if (ContainerSupport.mode() != ContainerSupport.Mode.OFF) ContainerSupport.probe(this);
             if (store != null) store.close();
             store = new Store(this);
             if (markets != null) markets.reload();
