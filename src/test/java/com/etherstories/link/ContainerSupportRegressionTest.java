@@ -50,6 +50,20 @@ class ContainerSupportRegressionTest {
     }
 
     @Test
+    void autoModeUsesCreateProbeOnlyForCreatePackages() {
+        ContainerSupport.configure("auto");
+        ContainerSupport.setProbeResultForTests(true, false);
+        assertTrue(ContainerSupport.splittable("minecraft:shulker_box"));
+        assertFalse(ContainerSupport.splittable("create:package"));
+        assertTrue(ContainerSupport.splittable("othermod:package"));
+
+        ContainerSupport.setProbeResultForTests(false, true);
+        assertFalse(ContainerSupport.splittable("minecraft:shulker_box"));
+        assertTrue(ContainerSupport.splittable("create:package"));
+        assertFalse(ContainerSupport.splittable("othermod:package"));
+    }
+
+    @Test
     void configOffBlocksAllContainersAndSkipsProbe() {
         ContainerSupport.configure("off");
         assertFalse(ContainerSupport.allow("minecraft:shulker_box"));

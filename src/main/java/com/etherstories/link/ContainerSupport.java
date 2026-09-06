@@ -64,7 +64,7 @@ public final class ContainerSupport {
         if (probing) return true;
         if (mode == Mode.ON) return true;
         if (!probed || skipped) return false;
-        return NestedItems.packageLike(itemKey) ? packageOk : genericOk;
+        return NestedItems.isCreatePackage(itemKey) ? packageOk : genericOk;
     }
 
     /** 容器现在能不能收发。拆不了的走整包，只有管理员显式关闭才真拦。 */
@@ -112,6 +112,14 @@ public final class ContainerSupport {
         probeMs = 0;
         DEGRADED.clear();
         NOTES.clear();
+    }
+
+    static void setProbeResultForTests(boolean generic, boolean createPackage) {
+        probed = true;
+        skipped = false;
+        genericOk = generic;
+        packageOk = createPackage;
+        packageInstalled = true;
     }
 
     public static String blockReason(String itemKey) {
