@@ -88,6 +88,21 @@ public final class ContainerSupport {
         NOTES.add("熔断已复位");
     }
 
+    /** 单测用：清掉静态自检与熔断，避免用例互相污染。 */
+    static void resetForTests() {
+        mode = Mode.AUTO;
+        probed = false;
+        skipped = false;
+        probing = false;
+        warming.set(false);
+        genericOk = false;
+        packageOk = false;
+        packageInstalled = false;
+        probeMs = 0;
+        tripped = null;
+        NOTES.clear();
+    }
+
     public static String blockReason(String itemKey) {
         if (mode == Mode.OFF) return "容器传输已在 config 里关闭";
         if (tripped != null) return "容器传输已熔断: " + tripped;

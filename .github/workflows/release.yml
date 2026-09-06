@@ -18,7 +18,7 @@ jobs:
           distribution: temurin
           java-version: "21"
           cache: maven
-      - run: mvn -B -DskipTests package
+      - run: mvn -B test package
       - name: Publish GitHub Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -27,4 +27,4 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             "target/ESLink-${VER}.jar" \
             --title "ESLink ${VER}" \
-            --notes "0.1.76：公屏 [i] 物品悬停改为纯文本，避免 Youer/模组服把物品快照塞进聊天包导致网络协议错误。跨服 item_b64 不变。各服都换这个 jar 后重启。"
+            --generate-notes
