@@ -1,0 +1,17 @@
+{
+  "name": "EtherSync-Link",
+  "install": "sudo apt-get update && sudo apt-get install -y --no-install-recommends maven openjdk-21-jdk && mvn -B -DskipTests package",
+  "terminals": [
+    {
+      "name": "market-server",
+      "command": "cd market-server && python3 etherlink_market.py --name EtherMarket --port 8765 --no-tui",
+      "description": "Standalone Python market service (SQLite-backed). Web UI and JSON API on http://127.0.0.1:8765/. First run writes an access token to market-server/data/market.json."
+    }
+  ],
+  "ports": [
+    {
+      "name": "market-server",
+      "port": 8765
+    }
+  ]
+}
