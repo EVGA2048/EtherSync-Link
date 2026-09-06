@@ -1137,7 +1137,7 @@ public final class ChestNet {
                 }
                 ItemStack decoded = packed == null ? ordinary : buildPackedGuarded(packed, q, "BK");
                 if (!ItemKeys.real(decoded)) {
-                    quarantine(q, "回退容器构建失败，已熔断");
+                    quarantine(q, "回退容器构建失败；仅隔离当前队列项");
                     return;
                 }
                 var inv = ChestListener.chestInv(b);
@@ -1177,8 +1177,8 @@ public final class ChestNet {
         if (!ItemKeys.real(item) || ms > ContainerSupport.BUILD_BUDGET_MS) {
             String why = phase + " #" + q.id() + " " + q.itemKey()
                     + (ItemKeys.real(item) ? " 构建过慢 " + ms + "ms" : " 构建失败");
-            ContainerSupport.trip(why);
-            plugin.getLogger().severe("容器传输已熔断: " + why);
+            ContainerSupport.degradeToWhole(q.itemKey(), why);
+            plugin.getLogger().warning("同类容器后续改走整包: " + why);
         } else {
             LinkLog.debug(phase + " 容器重建 " + q.itemKey() + " " + ms + "ms");
         }

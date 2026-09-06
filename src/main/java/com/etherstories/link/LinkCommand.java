@@ -295,7 +295,7 @@ public final class LinkCommand implements TabExecutor {
             return;
         }
         if (sub.equals("retry") || sub.equals("重试")) {
-            ContainerSupport.clearTrip();
+            ContainerSupport.clearDegrade();
             new java.io.File(plugin.getDataFolder(), "probe.lock").delete();
             ContainerSupport.probe(plugin);
             plugin.msg(p, "&a容器自检已开始（后台跑，几秒后再 /link diag 看结果）");

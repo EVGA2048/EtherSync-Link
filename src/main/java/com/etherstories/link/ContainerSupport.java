@@ -11,13 +11,13 @@ import java.util.concurrent.CopyOnWriteArrayList;
 /**
  * 容器传输能不能开，不靠猜，靠启动时真跑一遍往返。
  * Youer / Arclight 上潜影盒和 Create 包裹的组件能力差别很大，
- * 自检不过就整类不放行，宁可留在原地也不要拖垮主线程。
+ * 自检不过就停用拆包、改走整包，不能因为一件慢容器停掉全部运输。
  */
 public final class ContainerSupport {
 
     public enum Mode { AUTO, ON, OFF }
 
-    /** 单个容器在主线程上的重建预算，超了就熔断。 */
+    /** 单个容器在主线程上的重建预算，超了就让同类后续改走整包。 */
     static final long BUILD_BUDGET_MS = 60;
     private static final long MAIN_BUDGET_MS = 2000;
 
@@ -32,7 +32,8 @@ public final class ContainerSupport {
     private static volatile boolean packageOk;
     private static volatile boolean packageInstalled;
     private static volatile long probeMs;
-    private static volatile String tripped;
+    private static volatile String genericDegraded;
+    private static volatile String packageDegraded;
 
     private ContainerSupport() {}
 
@@ -56,7 +57,7 @@ public final class ContainerSupport {
     public static boolean splittable(String itemKey) {
         if (!NestedItems.containerLike(itemKey)) return false;
         if (NestedItems.fluidPackage(itemKey)) return false;
-        if (mode == Mode.OFF || tripped != null) return false;
+        if (mode == Mode.OFF || degraded(itemKey)) return false;
         // 自检就是在测这条路能不能走，不能拿它自己还没算出来的结论去挡它，
         // 否则 genericOk 永远是 false，自检永远失败。
         if (probing) return true;
@@ -65,30 +66,47 @@ public final class ContainerSupport {
         return NestedItems.packageLike(itemKey) ? packageOk : genericOk;
     }
 
-    /** 容器现在能不能收发。拆不了的走整包，所以只在关掉或熔断时才真拦。 */
+    /** 容器现在能不能收发。拆不了的走整包，只有管理员显式关闭才真拦。 */
     public static boolean allow(String itemKey) {
         if (!NestedItems.containerLike(itemKey)) return true;
-        return mode != Mode.OFF && tripped == null;
+        return mode != Mode.OFF;
     }
 
     /** 自检还没跑完：先别退回，等下一轮。 */
     public static boolean pending(String itemKey) {
         return NestedItems.containerLike(itemKey) && !NestedItems.fluidPackage(itemKey)
-                && mode == Mode.AUTO && !probed && !skipped && tripped == null;
+                && mode == Mode.AUTO && !probed && !skipped && !degraded(itemKey);
     }
 
-    public static void trip(String why) {
-        if (tripped != null) return;
-        tripped = why;
-        NOTES.add("熔断 " + why);
+    /**
+     * 某类容器在运行时拆包太慢或重建失败。当前队列项由调用方单独退回/隔离，
+     * 后续同类容器改走整包；另一类容器和全部普通物品继续工作。
+     */
+    public static void degradeToWhole(String itemKey, String why) {
+        String note = "运行时拆包降级 " + why;
+        if (NestedItems.packageLike(itemKey)) {
+            if (packageDegraded != null) return;
+            packageDegraded = why;
+            packageOk = false;
+        } else {
+            if (genericDegraded != null) return;
+            genericDegraded = why;
+            genericOk = false;
+        }
+        NOTES.add(note);
     }
 
-    public static void clearTrip() {
-        tripped = null;
-        NOTES.add("熔断已复位");
+    public static void clearDegrade() {
+        genericDegraded = null;
+        packageDegraded = null;
+        NOTES.add("运行时拆包降级已复位");
     }
 
-    /** 单测用：清掉静态自检与熔断，避免用例互相污染。 */
+    private static boolean degraded(String itemKey) {
+        return NestedItems.packageLike(itemKey) ? packageDegraded != null : genericDegraded != null;
+    }
+
+    /** 单测用：清掉静态自检与降级，避免用例互相污染。 */
     static void resetForTests() {
         mode = Mode.AUTO;
         probed = false;
@@ -99,13 +117,13 @@ public final class ContainerSupport {
         packageOk = false;
         packageInstalled = false;
         probeMs = 0;
-        tripped = null;
+        genericDegraded = null;
+        packageDegraded = null;
         NOTES.clear();
     }
 
     public static String blockReason(String itemKey) {
         if (mode == Mode.OFF) return "容器传输已在 config 里关闭";
-        if (tripped != null) return "容器传输已熔断: " + tripped;
         return "容器传输当前不可用";
     }
 
@@ -151,7 +169,7 @@ public final class ContainerSupport {
             // 只跳过这一次就把锁删掉：既不会反复把服务器带进同一个坑，也不会永久废掉容器。
             lock.delete();
             NOTES.add("上次自检没跑完服务器就没了，本次启动跳过，下次启动会自动重试");
-            plugin.getLogger().severe("容器自检上次未完成，本次跳过并停用容器传输。"
+            plugin.getLogger().warning("容器自检上次未完成，本次跳过并停用拆包，容器改走整包。"
                     + "重启后会自动重跑，也可以现在 /link diag retry。");
             return;
         }
@@ -184,8 +202,7 @@ public final class ContainerSupport {
         probed = true;
         lock.delete();
         // 主线程这段只该是几毫秒的物品重建。真超了说明还有重活漏在这边。
-        // 只关拆包，不要 trip：trip 会让 allow()=false，容器在 TX 里被静默跳过，
-        // 牌子无反应、东西也不动。整包快照仍可收发。
+        // 只关拆包：整包快照仍可收发，不能让 TX 牌子和物品一起静止。
         if (probeMs > MAIN_BUDGET_MS) {
             genericOk = false;
             packageOk = false;
@@ -195,17 +212,23 @@ public final class ContainerSupport {
         String verdict = "容器自检 " + probeMs + "ms · 潜影盒" + yn(genericOk) + " · 包裹" + yn(packageOk)
                 + " · 模式 " + mode;
         if (genericOk || packageOk || mode == Mode.OFF) plugin.getLogger().info(verdict);
-        else plugin.getLogger().warning(verdict + "，容器不会收发");
+        else plugin.getLogger().warning(verdict + "，容器改走整包");
     }
 
     public static List<String> lines() {
         List<String> out = new ArrayList<>();
         boolean ran = probed && !skipped;
         out.add("模式 " + mode + " · 自检 " + (ran ? probeMs + "ms" : "没跑过"));
-        out.add("潜影盒 " + route(genericOk && ran) + " · 包裹 "
-                + (packageInstalled || !ran ? route(packageOk && ran) : "本服没装"));
+        out.add("潜影盒 " + route(effectiveSplit("minecraft:shulker_box", genericOk, ran)) + " · 包裹 "
+                + (packageInstalled || !ran
+                ? route(effectiveSplit("create:package", packageOk, ran)) : "本服没装"));
         out.add("拆包=按内含投递，不兼容的退回发送方；整包=对面装了同样模组才收得到");
-        out.add(tripped == null ? "熔断 无" : "熔断 " + tripped);
+        if (genericDegraded == null && packageDegraded == null) {
+            out.add("运行时拆包降级 无");
+        } else {
+            if (genericDegraded != null) out.add("通用容器类已改走整包 " + genericDegraded);
+            if (packageDegraded != null) out.add("包裹类已改走整包 " + packageDegraded);
+        }
         out.addAll(NOTES);
         return out;
     }
@@ -216,6 +239,12 @@ public final class ContainerSupport {
 
     private static String route(boolean split) {
         return split ? "拆包" : "整包";
+    }
+
+    private static boolean effectiveSplit(String itemKey, boolean probeOk, boolean ran) {
+        if (mode == Mode.OFF || degraded(itemKey)) return false;
+        if (mode == Mode.ON) return true;
+        return ran && probeOk;
     }
 
     /** 只有 buildPacked 跑在主线程，预算就只卡它；编解码在生产里是异步的。 */
