@@ -22,13 +22,13 @@ class DeliveryCrashWindowTest {
     void crashAfterEnqueueBeforeTxRemoveDuplicatesOnRetry() {
         World world = World.withItemInTx("create:package");
         world.enqueueCurrent();
-        World crashed = world.snapshot();
+        assertEquals(1, world.count("create:package", Place.TX), "崩溃时物品还在发送箱");
+        assertEquals(1, world.count("create:package", Place.QUEUE));
 
-        crashed.retrySendFromChest();
+        world.retrySendFromChest();
 
-        assertEquals(2, crashed.count("create:package", Place.QUEUE),
+        assertEquals(2, world.count("create:package", Place.QUEUE),
                 "当前 takeMany 先 enqueueBatch 再删源物品：崩溃后重试会再入队一次");
-        assertEquals(1, crashed.count("create:package", Place.TX));
     }
 
     @Test
