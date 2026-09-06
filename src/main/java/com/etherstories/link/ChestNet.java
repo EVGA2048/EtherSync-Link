@@ -543,7 +543,15 @@ public final class ChestNet {
             if (!plugin.allowed(it)) continue;
             if (!Items.passFilter(Items.itemKey(it), tx.itemFilter())) continue;
             boolean heavy = NestedItems.containerLike(Items.itemKey(it));
-            if (heavy && !NestedItems.emptyBox(it) && !ContainerSupport.allow(Items.itemKey(it))) continue;
+            if (heavy && !NestedItems.emptyBox(it) && !ContainerSupport.allow(Items.itemKey(it))) {
+                if (lackNotified.add(tx.id() + "|container|" + Items.itemKey(it))) {
+                    plugin.getLogger().warning("容器未放行，留在 TX: " + Items.itemKey(it)
+                            + " · " + ContainerSupport.blockReason(Items.itemKey(it)));
+                    plugin.alerts().nodeFault("chest", tx, "hold",
+                            Items.itemKey(it) + " " + ContainerSupport.blockReason(Items.itemKey(it)));
+                }
+                continue;
+            }
             if (heavy) {
                 heavies.add(it.clone());
                 heavySlots.add(i);
@@ -933,11 +941,25 @@ public final class ChestNet {
                                     bw, bx, by, bz, p.getUniqueId(), p.getName());
                             plugin.store().bindBounce(txId, bkId);
                             if (bf != null) plugin.store().setSignFace(bkId, bf.name());
+                            // 绑定后立刻清掉 noback，否则牌子还会写「无回退箱」。
+                            if ("noback".equalsIgnoreCase(tx.status())
+                                    || "backfull".equalsIgnoreCase(tx.status())) {
+                                plugin.store().setChestStatus(txId, "linked");
+                            }
                             Models.ChestRow bk = plugin.store().chestById(bkId);
                             Models.ChestRow fresh = plugin.store().chestById(txId);
+                            Models.ChestRow paintTx = fresh;
+                            if (paintTx != null) {
+                                String st = paintTx.status();
+                                if ("noback".equalsIgnoreCase(st) || "backfull".equalsIgnoreCase(st))
+                                    paintTx = paintTx.withStatus("linked");
+                            }
+                            Models.ChestRow txSign = paintTx;
                             Bukkit.getScheduler().runTask(plugin, () -> {
+                                signSnap.remove(txId);
+                                signSnap.remove(bkId);
                                 if (bk != null) refreshSign(bk);
-                                if (fresh != null) refreshSign(fresh);
+                                if (txSign != null) refreshSign(txSign);
                                 plugin.msg(p, "&a已绑定回退箱 UNIT " + (bk == null ? bkId : bk.unit()));
                             });
                         } catch (Exception e) {

@@ -494,6 +494,31 @@ public final class ItemKeys {
         return asBukkit(nms);
     }
 
+    /** NMS ItemStack → 注册名，Craft 镜像失败时的兜底。 */
+    static String idFromNms(Object nms) {
+        if (nms == null) return null;
+        try {
+            Object item = nmsItem(nms);
+            if (item == null) return null;
+            Object rl = registryKey(item);
+            return rl == null ? null : rl.toString();
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    static int countOf(Object nms) {
+        if (nms == null) return 1;
+        for (String name : new String[]{"getCount", "getAmount"}) {
+            try {
+                Object r = Reflect.method(nms.getClass(), name).invoke(nms);
+                if (r instanceof Number n) return Math.max(1, n.intValue());
+            } catch (Throwable ignored) {
+            }
+        }
+        return 1;
+    }
+
     private static Object asNms(ItemStack bukkit) throws Exception {
         try {
             var f = bukkit.getClass().getDeclaredField("handle");
@@ -507,6 +532,7 @@ public final class ItemKeys {
     }
 
     private static ItemStack asBukkit(Object nms) throws Exception {
+        if (nms == null) return null;
         Class<?> craft = craftItem();
         Class<?> nmsStack = Class.forName("net.minecraft.world.item.ItemStack");
         for (String name : new String[]{"asCraftMirror", "asCraftCopy", "asBukkitCopy"}) {
@@ -516,9 +542,21 @@ public final class ItemKeys {
             } catch (Throwable ignored) {
             }
         }
+        // Youer：方法参数类型可能是接口/父类，按名字扫一遍。
+        for (Method m : Reflect.methods(craft)) {
+            if (m.getParameterCount() != 1) continue;
+            String n = m.getName();
+            if (!n.equals("asCraftMirror") && !n.equals("asCraftCopy") && !n.equals("asBukkitCopy")) continue;
+            try {
+                if (!m.getParameterTypes()[0].isInstance(nms)) continue;
+                Object r = m.invoke(null, nms);
+                if (r instanceof ItemStack st && real(st)) return st;
+            } catch (Throwable ignored) {
+            }
+        }
         for (var c : craft.getDeclaredConstructors()) {
             Class<?>[] p = c.getParameterTypes();
-            if (p.length != 1 || !p[0].isAssignableFrom(nmsStack)) continue;
+            if (p.length != 1 || !p[0].isInstance(nms)) continue;
             try {
                 c.setAccessible(true);
                 Object r = c.newInstance(nms);
@@ -534,12 +572,23 @@ public final class ItemKeys {
                 "org.bukkit.craftbukkit.inventory.CraftItemStack",
                 "org.bukkit.craftbukkit.v1_21_R1.inventory.CraftItemStack",
                 "org.bukkit.craftbukkit.v1_21_R2.inventory.CraftItemStack",
+                "org.bukkit.craftbukkit.v1_21_R3.inventory.CraftItemStack",
                 "org.bukkit.craftbukkit.v.inventory.CraftItemStack"
         }) {
             try {
                 return Class.forName(n);
             } catch (ClassNotFoundException ignored) {
             }
+        }
+        // 跟 CraftServer 同一包前缀找（Youer / 改过 remap 的混合端）
+        try {
+            String server = org.bukkit.Bukkit.getServer().getClass().getName();
+            int cut = server.lastIndexOf('.');
+            if (cut > 0) {
+                String guess = server.substring(0, cut) + ".inventory.CraftItemStack";
+                return Class.forName(guess);
+            }
+        } catch (Throwable ignored) {
         }
         throw new ClassNotFoundException("CraftItemStack");
     }

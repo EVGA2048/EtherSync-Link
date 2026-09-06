@@ -474,6 +474,13 @@ public final class ItemNbt {
 
     private static ItemStack namedFromNms(Object nms) throws Exception {
         ItemStack st = ItemKeys.fromNms(nms);
+        if (!ItemKeys.real(st)) {
+            // Youer 上 asBukkitCopy 偶发拿不到 Craft 镜像，用注册名兜底再建一次。
+            String id = ItemKeys.idFromNms(nms);
+            int count = ItemKeys.countOf(nms);
+            st = ItemKeys.create(id, count);
+            if (!ItemKeys.real(st)) return null;
+        }
         applyName(st, NestedItems.legacyCustomName(nms));
         return st;
     }
@@ -521,36 +528,68 @@ public final class ItemNbt {
 
     private static Object findRegistryAccess() {
         Class<?> ra = cls("net.minecraft.core.RegistryAccess");
+        Class<?> provider = cls("net.minecraft.core.HolderLookup$Provider");
         Object found = null;
-        try {
-            Class<?> ms = Class.forName("net.minecraft.server.MinecraftServer");
-            Object server = Reflect.method(ms, "getServer").invoke(null);
-            if (server != null) found = Reflect.method(server.getClass(), "registryAccess").invoke(server);
-        } catch (Throwable ignored) {
+        for (Object server : candidateServers()) {
+            if (server == null) continue;
+            found = invokeRegistryAccess(server);
+            if (isRegs(found, ra) || isProvider(found, provider)) return unwrapRegs(found, ra);
         }
-        if (isRegs(found, ra)) return found;
-        try {
-            Object bukkit = Bukkit.getServer();
-            Object nms = Reflect.method(bukkit.getClass(), "getServer").invoke(bukkit);
-            Class<?> ms = Class.forName("net.minecraft.server.MinecraftServer");
-            if (nms != null && ms.isInstance(nms))
-                found = Reflect.method(nms.getClass(), "registryAccess").invoke(nms);
-        } catch (Throwable ignored) {
-        }
-        if (isRegs(found, ra)) return found;
         try {
             for (var w : Bukkit.getWorlds()) {
                 Object handle = Reflect.method(w.getClass(), "getHandle").invoke(w);
-                found = Reflect.method(handle.getClass(), "registryAccess").invoke(handle);
-                if (isRegs(found, ra)) return found;
+                found = invokeRegistryAccess(handle);
+                if (isRegs(found, ra) || isProvider(found, provider)) return unwrapRegs(found, ra);
             }
         } catch (Throwable ignored) {
         }
         return unwrapRegs(found, ra);
     }
 
+    private static Object[] candidateServers() {
+        java.util.ArrayList<Object> out = new java.util.ArrayList<>();
+        try {
+            Class<?> ms = Class.forName("net.minecraft.server.MinecraftServer");
+            out.add(Reflect.method(ms, "getServer").invoke(null));
+        } catch (Throwable ignored) {
+        }
+        try {
+            Object bukkit = Bukkit.getServer();
+            out.add(Reflect.method(bukkit.getClass(), "getServer").invoke(bukkit));
+        } catch (Throwable ignored) {
+        }
+        // Youer / NeoForge
+        for (String hook : new String[]{
+                "net.neoforged.neoforge.server.ServerLifecycleHooks",
+                "net.minecraftforge.server.ServerLifecycleHooks"
+        }) {
+            try {
+                Class<?> c = Class.forName(hook);
+                out.add(Reflect.method(c, "getCurrentServer").invoke(null));
+            } catch (Throwable ignored) {
+            }
+        }
+        return out.toArray();
+    }
+
+    private static Object invokeRegistryAccess(Object target) {
+        if (target == null) return null;
+        for (String name : new String[]{"registryAccess", "getRegistryAccess"}) {
+            try {
+                Object r = Reflect.method(target.getClass(), name).invoke(target);
+                if (r != null) return r;
+            } catch (Throwable ignored) {
+            }
+        }
+        return null;
+    }
+
     private static boolean isRegs(Object o, Class<?> ra) {
         return o != null && (ra == null || ra.isInstance(o));
+    }
+
+    private static boolean isProvider(Object o, Class<?> provider) {
+        return o != null && provider != null && provider.isInstance(o);
     }
 
     private static Object unwrapRegs(Object o, Class<?> ra) {

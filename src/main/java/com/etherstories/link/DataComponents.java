@@ -245,7 +245,14 @@ public final class DataComponents {
 
     /** 拿到含模组组件的全量 DataComponentType 注册表；静态字段在混合端可能只有原版。 */
     private static Object dataComponentRegistry() {
-        if (dcRegProbed) return dcRegCache;
+        Object cached = dcRegCache;
+        if (dcRegProbed && cached != null) return cached;
+        if (dcRegProbed && cached == null) {
+            // 启动早期可能还拿不到 RegistryAccess，允许再试一次。
+            Object ra = ItemNbt.registryAccess();
+            if (ra == null) return null;
+            dcRegProbed = false;
+        }
         Object reg = null;
         try {
             Object ra = ItemNbt.registryAccess();

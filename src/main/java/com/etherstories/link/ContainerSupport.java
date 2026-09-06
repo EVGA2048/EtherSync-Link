@@ -168,12 +168,12 @@ public final class ContainerSupport {
         probeMs = (System.nanoTime() - t0) / 1_000_000L;
         probed = true;
         lock.delete();
-        // 主线程这段只该是几毫秒的物品重建。真超了说明还有重活漏在这边，
-        // 宁可停掉拆包也不能让它每次重载都卡一次服。
+        // 主线程这段只该是几毫秒的物品重建。真超了说明还有重活漏在这边。
+        // 只关拆包，不要 trip：trip 会让 allow()=false，容器在 TX 里被静默跳过，
+        // 牌子无反应、东西也不动。整包快照仍可收发。
         if (probeMs > MAIN_BUDGET_MS) {
             genericOk = false;
             packageOk = false;
-            trip("自检占用主线程 " + probeMs + "ms");
             NOTES.add("自检太慢已停用拆包，容器改走整包");
         }
         for (String line : NOTES) plugin.getLogger().info("容器自检 · " + line);

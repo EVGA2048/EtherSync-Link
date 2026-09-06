@@ -1,6 +1,5 @@
 package com.etherstories.link;
 
-import net.md_5.bungee.api.chat.TextComponent;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
@@ -109,27 +108,22 @@ public final class LinkLog {
     }
 
     static void show(Player p) {
-        List<String> all = new ArrayList<>(LINES);
-        if (all.isEmpty()) {
-            plugin.msg(p, "&7还没有日志");
+        if (plugin == null) {
+            ChatMsg.notice(p, "日志未初始化");
             return;
         }
-        plugin.msg(p, "&8—— ESLink 日志 " + all.size() + " 条 · debug=" + (debug ? "开" : "关") + " ——");
-        int from = Math.max(0, all.size() - 12);
-        for (int i = from; i < all.size(); i++) plugin.msg(p, "&7" + all.get(i));
-        String dump = String.join("\n", all);
-        if (dump.length() > 12000) dump = dump.substring(dump.length() - 12000);
-        try {
-            TextComponent row = ChatMsg.text("");
-            row.addExtra(ChatMsg.copy("&a[点击复制全部]", dump, "复制到剪贴板，发给我"));
-            row.addExtra(ChatMsg.legacy("  "));
-            row.addExtra(ChatMsg.click("&e[打开日志书]", "/link log book", "写成书方便翻"));
-            ChatMsg.send(p, row);
-        } catch (Throwable t) {
-            plugin.msg(p, "&7复制按钮不可用，改开日志书");
-            giveBook(p);
+        List<String> all = new ArrayList<>(LINES);
+        String ver = plugin.getDescription().getVersion();
+        plugin.msg(p, "&8—— ESLink 日志 v" + ver + " · " + RuntimeEnv.label()
+                + " · " + all.size() + " 条 · debug=" + (debug ? "开" : "关") + " ——");
+        if (all.isEmpty()) {
+            plugin.msg(p, "&7还没有日志。开详细：/link log debug");
+            return;
         }
-        plugin.msg(p, "&8/link log debug  详细收发  ·  /link log clear  清空");
+        int from = Math.max(0, all.size() - 20);
+        for (int i = from; i < all.size(); i++) plugin.msg(p, "&7" + all.get(i));
+        // Youer 上 Bungee 点击组件会炸协议，一律走纯文本。
+        plugin.msg(p, "&8/link log book  打开日志书  ·  /link log debug  详细  ·  /link log clear  清空");
     }
 
     static void giveBook(Player p) {

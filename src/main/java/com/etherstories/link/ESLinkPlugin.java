@@ -51,10 +51,9 @@ public final class ESLinkPlugin extends JavaPlugin {
         } else {
             getLogger().severe("plugin.yml 没有 link 指令，检查是否用错了 jar");
         }
-        LinkLog.attach(this);
-
         try {
             RuntimeEnv.probe();
+            LinkLog.attach(this);
             getLogger().info("平台: " + RuntimeEnv.label() + " · " + RuntimeEnv.itemStrategy());
             saveDefaultConfig();
             ConfigUpdater.migrate(this);
