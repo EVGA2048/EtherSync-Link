@@ -233,7 +233,7 @@ Please walk through these points before going live. Each item states the intende
 10. **When the fallback chest is full, sending pauses and items stay in the TX.** That is protection, not a fault. Empty the fallback chest and wait for the next scan.
 11. **Items from mods this server does not have cannot be bought or delivered.** Unknown extras are delivered with a note by default; set `chest.unknown-extra` to `refuse` to return the whole stack.
 12. **The web terminal’s “send to every server” flag is memory-only for now.** After a reload or restart, an offline player returns to `chat.default`. Once they join, player data is authoritative.
-13. **Deploy only the jar that matches the current release** (for example `ESLink-0.2.9.jar`). The `dist/` folder may still hold older builds; do not copy them together.
+13. **Deploy only the `ESLink-<version>.jar` for the current release.** The `dist/` folder may still hold older builds; do not copy them together.
 14. **Do not commit tokens, database passwords, or market URLs to a public repository.** `market-server/data/` is already in `.gitignore`.
 
 ## Configuration keys
