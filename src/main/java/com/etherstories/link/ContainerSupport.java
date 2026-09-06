@@ -6,7 +6,9 @@ import org.bukkit.inventory.ItemStack;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 容器传输能不能开，不靠猜，靠启动时真跑一遍往返。
@@ -32,8 +34,7 @@ public final class ContainerSupport {
     private static volatile boolean packageOk;
     private static volatile boolean packageInstalled;
     private static volatile long probeMs;
-    private static volatile String genericDegraded;
-    private static volatile String packageDegraded;
+    private static final Map<String, String> DEGRADED = new ConcurrentHashMap<>();
 
     private ContainerSupport() {}
 
@@ -79,31 +80,23 @@ public final class ContainerSupport {
     }
 
     /**
-     * 某类容器在运行时拆包太慢或重建失败。当前队列项由调用方单独退回/隔离，
-     * 后续同类容器改走整包；另一类容器和全部普通物品继续工作。
+     * 某种容器在运行时拆包太慢或重建失败。当前队列项由调用方单独退回/隔离，
+     * 后续同注册名容器改走整包；其他容器和全部普通物品继续工作。
      */
     public static void degradeToWhole(String itemKey, String why) {
-        String note = "运行时拆包降级 " + why;
-        if (NestedItems.packageLike(itemKey)) {
-            if (packageDegraded != null) return;
-            packageDegraded = why;
-            packageOk = false;
-        } else {
-            if (genericDegraded != null) return;
-            genericDegraded = why;
-            genericOk = false;
-        }
-        NOTES.add(note);
+        String key = itemKey == null ? "" : itemKey.trim().toLowerCase(Locale.ROOT);
+        if (key.isEmpty()) return;
+        if (DEGRADED.putIfAbsent(key, why) == null)
+            NOTES.add("运行时拆包降级 " + key + " · " + why);
     }
 
     public static void clearDegrade() {
-        genericDegraded = null;
-        packageDegraded = null;
+        DEGRADED.clear();
         NOTES.add("运行时拆包降级已复位");
     }
 
     private static boolean degraded(String itemKey) {
-        return NestedItems.packageLike(itemKey) ? packageDegraded != null : genericDegraded != null;
+        return itemKey != null && DEGRADED.containsKey(itemKey.trim().toLowerCase(Locale.ROOT));
     }
 
     /** 单测用：清掉静态自检与降级，避免用例互相污染。 */
@@ -117,8 +110,7 @@ public final class ContainerSupport {
         packageOk = false;
         packageInstalled = false;
         probeMs = 0;
-        genericDegraded = null;
-        packageDegraded = null;
+        DEGRADED.clear();
         NOTES.clear();
     }
 
@@ -131,8 +123,22 @@ public final class ContainerSupport {
      * 重活（遍历一万多项注册表）先在异步线程做完，主线程只留造 BlockStateMeta 那几毫秒。
      * 以前整个自检都压在主线程上，Arclight 实测 45 秒，玩家全超时掉线。
      */
-    public static void probe(ESLinkPlugin plugin) {
-        if (!warming.compareAndSet(false, true)) return;
+    public static boolean probe(ESLinkPlugin plugin) {
+        if (mode == Mode.OFF || !warming.compareAndSet(false, true)) return false;
+        runProbe(plugin);
+        return true;
+    }
+
+    /** 仅在确实抢到一次新自检时清除运行时降级与上次中断锁。 */
+    public static boolean retryProbe(ESLinkPlugin plugin) {
+        if (mode == Mode.OFF || !warming.compareAndSet(false, true)) return false;
+        clearDegrade();
+        new java.io.File(plugin.getDataFolder(), "probe.lock").delete();
+        runProbe(plugin);
+        return true;
+    }
+
+    private static void runProbe(ESLinkPlugin plugin) {
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
             long t = System.nanoTime();
             try {
@@ -223,11 +229,12 @@ public final class ContainerSupport {
                 + (packageInstalled || !ran
                 ? route(effectiveSplit("create:package", packageOk, ran)) : "本服没装"));
         out.add("拆包=按内含投递，不兼容的退回发送方；整包=对面装了同样模组才收得到");
-        if (genericDegraded == null && packageDegraded == null) {
+        if (DEGRADED.isEmpty()) {
             out.add("运行时拆包降级 无");
         } else {
-            if (genericDegraded != null) out.add("通用容器类已改走整包 " + genericDegraded);
-            if (packageDegraded != null) out.add("包裹类已改走整包 " + packageDegraded);
+            List<String> keys = new ArrayList<>(DEGRADED.keySet());
+            java.util.Collections.sort(keys);
+            for (String key : keys) out.add(key + " 已改走整包 " + DEGRADED.get(key));
         }
         out.addAll(NOTES);
         return out;

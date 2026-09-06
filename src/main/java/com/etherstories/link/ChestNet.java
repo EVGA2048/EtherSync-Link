@@ -543,7 +543,7 @@ public final class ChestNet {
             if (!plugin.allowed(it)) continue;
             if (!Items.passFilter(Items.itemKey(it), tx.itemFilter())) continue;
             boolean heavy = NestedItems.containerLike(Items.itemKey(it));
-            if (heavy && !NestedItems.emptyBox(it) && !ContainerSupport.allow(Items.itemKey(it))) {
+            if (heavy && !ContainerSupport.allow(Items.itemKey(it))) {
                 if (lackNotified.add(tx.id() + "|container|" + Items.itemKey(it))) {
                     plugin.getLogger().warning("容器未放行，留在 TX: " + Items.itemKey(it)
                             + " · " + ContainerSupport.blockReason(Items.itemKey(it)));
@@ -714,7 +714,7 @@ public final class ChestNet {
 
     private void deliver(Models.QueueRow q) {
         if (!emptyContainer(q) && ContainerSupport.pending(q.itemKey())) return;
-        if (!emptyContainer(q) && !ContainerSupport.allow(q.itemKey())) {
+        if (!ContainerSupport.allow(q.itemKey())) {
             if (qBusy.add(q.id())) bounce(q, ContainerSupport.blockReason(q.itemKey()));
             return;
         }
@@ -1091,7 +1091,7 @@ public final class ChestNet {
 
     private void returnBounce(Models.QueueRow q) {
         if (!emptyContainer(q) && ContainerSupport.pending(q.itemKey())) return;
-        if (!emptyContainer(q) && !ContainerSupport.allow(q.itemKey())) {
+        if (!ContainerSupport.allow(q.itemKey())) {
             if (qBusy.add(q.id())) quarantine(q, ContainerSupport.blockReason(q.itemKey()));
             return;
         }
@@ -1178,7 +1178,7 @@ public final class ChestNet {
             String why = phase + " #" + q.id() + " " + q.itemKey()
                     + (ItemKeys.real(item) ? " 构建过慢 " + ms + "ms" : " 构建失败");
             ContainerSupport.degradeToWhole(q.itemKey(), why);
-            plugin.getLogger().warning("同类容器后续改走整包: " + why);
+            plugin.getLogger().warning("同注册名容器后续改走整包: " + why);
         } else {
             LinkLog.debug(phase + " 容器重建 " + q.itemKey() + " " + ms + "ms");
         }

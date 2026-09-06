@@ -31,7 +31,8 @@ class ContainerSupportRegressionTest {
         assertTrue(ContainerSupport.allow("create:package"));
         assertTrue(ContainerSupport.splittable("minecraft:shulker_box"));
         assertFalse(ContainerSupport.splittable("create:package"));
-        assertTrue(ContainerSupport.lines().stream().anyMatch(s -> s.contains("包裹类已改走整包")));
+        assertTrue(ContainerSupport.splittable("othermod:package"));
+        assertTrue(ContainerSupport.lines().stream().anyMatch(s -> s.contains("create:package 已改走整包")));
     }
 
     @Test
@@ -45,15 +46,17 @@ class ContainerSupportRegressionTest {
         assertTrue(ContainerSupport.allow("create:package"));
         assertFalse(ContainerSupport.splittable("minecraft:shulker_box"));
         assertTrue(ContainerSupport.splittable("create:package"));
-        assertTrue(ContainerSupport.lines().stream().anyMatch(s -> s.contains("通用容器类已改走整包")));
+        assertTrue(ContainerSupport.lines().stream().anyMatch(s -> s.contains("minecraft:shulker_box 已改走整包")));
     }
 
     @Test
-    void configOffBlocksContainersWithoutTripping() {
+    void configOffBlocksAllContainersAndSkipsProbe() {
         ContainerSupport.configure("off");
         assertFalse(ContainerSupport.allow("minecraft:shulker_box"));
         assertFalse(ContainerSupport.splittable("minecraft:shulker_box"));
         assertTrue(ContainerSupport.allow("minecraft:diamond"));
+        assertFalse(ContainerSupport.probe(null));
+        assertFalse(ContainerSupport.retryProbe(null));
     }
 
     @Test
