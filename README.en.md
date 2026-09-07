@@ -294,6 +294,14 @@ mvn -q package
 
 The artifact is `target/ESLink-<version>.jar`, and a copy is placed in `dist/`. Deploy the file that matches the current version; do not mix older copies from that folder.
 
+To spin up two local Paper 1.21.1 test servers (use Paper only on a 6 GB machine; skip Youer / modpacks):
+
+```bash
+./scripts/setup-paper.sh
+```
+
+This writes `servers/es2` (port 25565) and `servers/snc` (25566), with online-mode off, view-distance 2, and a 768M heap. A built plugin jar is copied in when present. Both servers must share one MySQL instance; put the password in each `plugins/ESLink/config.yml`. For a single server: `./scripts/setup-paper.sh --one ~/paper-a`.
+
 ## Intended use and participation
 
 This plugin is intended for community, non-commercial servers. Linking it with a for-profit commercial server is not recommended. Even among community servers, please connect only to hosts you trust and can keep secure together. Once a link is established, items, chat, and some economic data move between the two sides; joining an untrusted node may introduce security risk.
