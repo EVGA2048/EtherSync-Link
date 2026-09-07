@@ -294,6 +294,32 @@ mvn -q package
 
 产物位于 `target/ESLink-<version>.jar`，并会再复制一份到 `dist/`。请将当前版本的这一份用于部署，而不要混用目录中的旧文件。
 
+本机联调可一键拉两台 1.21.1 测试服（正版验证关闭，视距 2）。已构建过插件的话会一并拷入。两台服需共用同一套 MySQL；密码写在各服 `plugins/ESLink/config.yml`。
+
+**macOS / Linux · Paper**（6G 机器请只用这条，不要上 Youer / 整合包）：
+
+```bash
+./scripts/setup-paper.sh
+```
+
+默认写到 `servers/es2`（25565）与 `servers/snc`（25566），堆内存 768M。单服：`./scripts/setup-paper.sh --one ~/paper-a`。
+
+**Windows · Youer / Arclight**（混合端，双开建议 8G 以上内存）：
+
+```bat
+scripts\setup-youer.bat
+scripts\setup-arclight.bat
+```
+
+或在 PowerShell 中：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\setup-youer.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\setup-arclight.ps1
+```
+
+Youer 写到 `servers-youer\`，Arclight 写到 `servers-arclight\`，堆内存默认 2G。Create 等模组需自行放入各服 `mods\`，两端必须相同。单服：`.\scripts\setup-youer.ps1 -One -Dest C:\mc\youer-a`。
+
 ## 适用范围与参与
 
 本插件建议用于公益服务器之间的互通，不建议与以营利为目的的商业服务器相互连接。即便同为公益服，也请仅接入您充分信任、能够共同维护安全的服务器。互通一旦建立，物品、聊天与部分经济数据便会在两端之间流动；接入不可信的节点，可能带来安全风险。
