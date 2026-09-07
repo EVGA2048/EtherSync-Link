@@ -294,13 +294,31 @@ mvn -q package
 
 产物位于 `target/ESLink-<version>.jar`，并会再复制一份到 `dist/`。请将当前版本的这一份用于部署，而不要混用目录中的旧文件。
 
-本机 Paper 联调（6G 机器建议只用 Paper，不要上 Youer / 整合包）可一键拉两台 1.21.1 测试服：
+本机联调可一键拉两台 1.21.1 测试服（正版验证关闭，视距 2）。已构建过插件的话会一并拷入。两台服需共用同一套 MySQL；密码写在各服 `plugins/ESLink/config.yml`。
+
+**macOS / Linux · Paper**（6G 机器请只用这条，不要上 Youer / 整合包）：
 
 ```bash
 ./scripts/setup-paper.sh
 ```
 
-默认写到仓库下 `servers/es2`（端口 25565）与 `servers/snc`（25566），正版验证关闭，视距 2，堆内存 768M。已构建过插件的话会一并拷入。两台服需共用同一套 MySQL；密码写在各服 `plugins/ESLink/config.yml`。单服可用 `./scripts/setup-paper.sh --one ~/paper-a`。
+默认写到 `servers/es2`（25565）与 `servers/snc`（25566），堆内存 768M。单服：`./scripts/setup-paper.sh --one ~/paper-a`。
+
+**Windows · Youer / Arclight**（混合端，双开建议 8G 以上内存）：
+
+```bat
+scripts\setup-youer.bat
+scripts\setup-arclight.bat
+```
+
+或在 PowerShell 中：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\setup-youer.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\setup-arclight.ps1
+```
+
+Youer 写到 `servers-youer\`，Arclight 写到 `servers-arclight\`，堆内存默认 2G。Create 等模组需自行放入各服 `mods\`，两端必须相同。单服：`.\scripts\setup-youer.ps1 -One -Dest C:\mc\youer-a`。
 
 ## 适用范围与参与
 
